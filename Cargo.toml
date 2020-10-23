@@ -1,5 +1,5 @@
 [package]
-name = "rs-meetings"
+name = "meeters"
 version = "0.1.0"
 authors = ["Boris Terzic <boris@terzic.be>"]
 edition = "2018"

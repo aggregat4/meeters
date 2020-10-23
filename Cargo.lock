@@ -929,6 +929,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ffc5c5338469d4d3ea17d269fa8ea3512ad247247c30bd2df69e68309ed0a08"
 
 [[package]]
+name = "meeters"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "gtk",
+ "ical",
+ "libappindicator",
+ "property",
+ "reqwest",
+ "tokio",
+]
+
+[[package]]
 name = "memchr"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1406,19 +1419,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winreg",
-]
-
-[[package]]
-name = "rs-meetings"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "gtk",
- "ical",
- "libappindicator",
- "property",
- "reqwest",
- "tokio",
 ]
 
 [[package]]
