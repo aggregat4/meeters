@@ -188,9 +188,7 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
 
 fn get_events(url: &str) -> Result<Vec<Event>, CalendarError> {
     // the .or() invocation converts from the custom reqwest error to our standard CalendarError
-    let text = get_ical(url).or(Err(CalendarError {
-        msg: "asdasd".to_string(),
-    }))?;
+    let text = get_ical(url).or_else(|get_error| Err(CalendarError { msg: format!("Error getting calendar: {}", get_error).to_string() }))?;
     let mut reader = ical::IcalParser::new(text.as_bytes());
     match reader.next() {
         Some(result) => match result {
@@ -259,10 +257,10 @@ fn main() {
     indicator.set_menu(&mut menu);
     // start the background thread for calendar work
     let args: Vec<String> = env::args().collect();
-    if args.len() == 0 {
+    if args.len() == 1 {
         panic!("Need a command line argument with the url of the ICS file")
     }
-    start_calendar_work(String::from(&args[0]));
+    start_calendar_work(String::from(&args[1]));
     // start listening for messsages
     gtk::main();
 }
