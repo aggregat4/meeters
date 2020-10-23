@@ -1,0 +1,16 @@
+[package]
+name = "rs-meetings"
+version = "0.1.0"
+authors = ["Boris Terzic <boris@terzic.be>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libappindicator = "0.5.2"
+gtk = "0.9.1"
+reqwest = { version = "0.10", features = ["blocking"] }
+tokio = { version = "0.2", features = ["full"] }
+ical = "0.6.0"
+property = "0.3.2"
+chrono = "0.4.19"
