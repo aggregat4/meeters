@@ -61,6 +61,7 @@ fn find_param<'a>(params: &'a Vec<(String, Vec<String>)>, name: &str) -> Option<
     return None;
 }
 
+#[derive(Debug)]
 struct Event {
     summary: String,
     description: String,
@@ -196,11 +197,11 @@ fn get_events(url: &str) -> Result<Vec<Event>, CalendarError> {
                 println!("Number of events: {:?}", calendar.events.len());
                 let mut events: Vec<Event> = Vec::new();
                 for event in calendar.events {
-                    println!(
-                        "Summary {:?}, DTSTART: {:?}",
-                        find_property_value(&event.properties, "SUMMARY"),
-                        find_property_value(&event.properties, "DTSTART")
-                    );
+                    // println!(
+                    //     "Summary {:?}, DTSTART: {:?}",
+                    //     find_property_value(&event.properties, "SUMMARY"),
+                    //     find_property_value(&event.properties, "DTSTART")
+                    // );
                     events.push(parse_event(&event)?);
                 }
                 return Ok(events);
@@ -217,7 +218,16 @@ fn start_calendar_work(url: String) {
     // TODO: figure out this move crap
     thread::spawn(move || loop {
         match get_events(&url) {
-            Ok(events) => println!("Successfully got {:?} events", events.len()),
+            Ok(events) => {
+                println!("Successfully got {:?} events", events.len());
+                let today_start = Local::now().date().and_hms(0, 0, 0);
+                let today_end = Local::now().date().and_hms(23, 59, 59);
+                let today_events = events
+                    .into_iter()
+                    .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
+                    .collect::<Vec<_>>();
+                println!("There are {} events for today: {:?}", today_events.len(), today_events);
+            },
             Err(e) => println!("Error getting events: {:?}", e.msg),
         }
         thread::sleep(Duration::from_secs(10));
