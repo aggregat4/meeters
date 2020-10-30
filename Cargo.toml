@@ -14,3 +14,4 @@ tokio = { version = "0.2", features = ["full"] }
 ical = "0.6.0"
 property = "0.3.2"
 chrono = "0.4.19"
+rrule = "0.2.8"

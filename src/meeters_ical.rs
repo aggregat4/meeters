@@ -1,7 +1,12 @@
+extern crate rrule;
+
 use ical::parser::ical::component::IcalEvent;
 use ical::property::Property;
 use chrono::prelude::*;
 use std::fmt;
+use rrule::build_rrule;
+use rrule::build_rruleset;
+use rrule::RRuleSet;
 
 // From https://doc.rust-lang.org/stable/rust-by-example/error/multiple_error_types/define_error_type.html and message added
 #[derive(Debug, Clone)]
@@ -182,12 +187,96 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
         Some(result) => match result {
             Ok(calendar) => {
                 println!("Number of events: {:?}", calendar.events.len());
-                return calendar.events.into_iter().map(|e| parse_event(&e)).collect();
+                return calendar.events.into_iter().map(|e| {
+                    let event_as_string = &ical_event_to_string(&e);
+                    match build_rruleset(event_as_string) {
+                        Ok(mut ruleset) => {
+                            let rules = ruleset.all();
+                            if rules.len() > 0 {
+                                println!("Running rrule on {} gave {} rules", event_as_string, rules.len());
+                            }        
+                        }
+                        Err(e) => println!("Error building ruleset from {}: {}", event_as_string, e)
+                    }
+                    return parse_event(&e);
+                }).collect();
             }
             Err(e) => Err(CalendarError {
                 msg: format!("error in ical parsing: {}", e),
             }),
         },
         None => return Ok(vec![]),
+    }
+}
+
+fn params_to_string(params: &Vec<(String, Vec<String>)>) -> String {
+    if params.is_empty() {
+        return "".to_string();
+    } else {
+        return format!(";{}",
+            params
+                .into_iter()
+                .map(|param| format!("{}={}", param.0, param.1.join(",")))
+                .collect::<Vec<String>>()
+                .join(","));
+    }
+}
+
+fn prop_to_string(prop: &Property) -> String {
+    return format!("{}{}:{}", prop.name, params_to_string(&prop.params.as_ref().unwrap_or(&vec![])), prop.value.as_ref().unwrap_or(&"".to_string()));
+}
+
+fn ical_event_to_string(event: &IcalEvent) -> String {
+    return event.properties
+        // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
+        .iter()
+        .map(|p| prop_to_string(&p))
+        .collect::<Vec<String>>()
+        .join("\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use ical::parser::Component;
+    use super::*;
+
+    #[test]
+    fn ical_to_string_empty_ical_event() {
+        assert_eq!("", ical_event_to_string(&IcalEvent::new()));
+    }
+
+    #[test]
+    fn ical_to_string_one_prop_with_value() {
+        let mut event = IcalEvent::new();
+        let mut prop = Property::new();
+        prop.name = "DESCRIPTION".to_string();
+        prop.value = Some("foobar".to_string());
+        event.add_property(prop);
+        assert_eq!("DESCRIPTION:foobar", ical_event_to_string(&event));
+    }
+
+    #[test]
+    fn ical_to_string_one_prop_with_no_value() {
+        let mut event = IcalEvent::new();
+        let mut prop = Property::new();
+        prop.name = "DESCRIPTION".to_string();
+        event.add_property(prop);
+        assert_eq!("DESCRIPTION:", ical_event_to_string(&event));
+    }
+
+    #[test]
+    fn ical_to_string_two_props() {
+        let mut event = IcalEvent::new();
+        let mut prop = Property::new();
+        prop.name = "FOO".to_string();
+        prop.value = Some("bar".to_string());
+        event.add_property(prop);
+        
+        prop = Property::new();
+        prop.name = "baz".to_string();
+        prop.value = Some("qux".to_string());
+        event.add_property(prop);
+
+        assert_eq!("FOO:bar\nbaz:qux", ical_event_to_string(&event));
     }
 }
