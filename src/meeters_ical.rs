@@ -4,9 +4,9 @@ use ical::parser::ical::component::IcalEvent;
 use ical::property::Property;
 use chrono::prelude::*;
 use std::fmt;
-use rrule::build_rrule;
-use rrule::build_rruleset;
+use rrule::RRule;
 use rrule::RRuleSet;
+use std::cmp::Ordering;
 
 // From https://doc.rust-lang.org/stable/rust-by-example/error/multiple_error_types/define_error_type.html and message added
 #[derive(Debug, Clone)]
@@ -188,8 +188,14 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
             Ok(calendar) => {
                 println!("Number of events: {:?}", calendar.events.len());
                 return calendar.events.into_iter().map(|e| {
-                    let event_as_string = &ical_event_to_string(&e);
-                    match build_rruleset(event_as_string) {
+                    let mut rrule_props = e.properties
+                        .iter()
+                        .filter(|p| p.name == "DTSTART" || p.name == "RRULE") // || p.name == "DTEND"
+                        .cloned() // this is required because we have a vec of values before this and collect only works on references, maybe?
+                        .collect::<Vec<Property>>();
+                    rrule_props.sort_by(|a, b| if a.name == "DTSTART" { Ordering::Less } else if b.name == "DTSTART" { Ordering::Greater } else { Ordering::Equal });
+                    let event_as_string = properties_to_string(&rrule_props);
+                    match event_as_string.parse::<RRuleSet>() {
                         Ok(mut ruleset) => {
                             let rules = ruleset.all();
                             if rules.len() > 0 {
@@ -226,13 +232,16 @@ fn prop_to_string(prop: &Property) -> String {
     return format!("{}{}:{}", prop.name, params_to_string(&prop.params.as_ref().unwrap_or(&vec![])), prop.value.as_ref().unwrap_or(&"".to_string()));
 }
 
-fn ical_event_to_string(event: &IcalEvent) -> String {
-    return event.properties
-        // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
-        .iter()
+fn properties_to_string(properties: &Vec<Property>) -> String {
+    return properties
+        .iter() // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
         .map(|p| prop_to_string(&p))
         .collect::<Vec<String>>()
         .join("\n");
+}
+
+fn ical_event_to_string(event: &IcalEvent) -> String {
+    return properties_to_string(&event.properties);
 }
 
 #[cfg(test)]
@@ -279,4 +288,12 @@ mod tests {
 
         assert_eq!("FOO:bar\nbaz:qux", ical_event_to_string(&event));
     }
+
+
+    
+    #[test]
+    fn rruleset_parsing() {
+        "DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
+    }
+
 }
