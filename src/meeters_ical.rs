@@ -215,6 +215,14 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     }
 }
 
+fn format_param_values(param_values: &Vec<String>) -> String {
+    return param_values
+        .iter()
+        .map(|param_val| if param_val.contains(" ") { format!("\"{}\"", param_val) } else { param_val.to_string() } )
+        .collect::<Vec<String>>()
+        .join(",");
+}
+
 fn params_to_string(params: &Vec<(String, Vec<String>)>) -> String {
     if params.is_empty() {
         return "".to_string();
@@ -222,7 +230,7 @@ fn params_to_string(params: &Vec<(String, Vec<String>)>) -> String {
         return format!(";{}",
             params
                 .into_iter()
-                .map(|param| format!("{}={}", param.0, param.1.join(",")))
+                .map(|param| format!("{}={}", param.0, format_param_values(&param.1)))
                 .collect::<Vec<String>>()
                 .join(","));
     }
@@ -288,12 +296,15 @@ mod tests {
 
         assert_eq!("FOO:bar\nbaz:qux", ical_event_to_string(&event));
     }
-
-
     
     #[test]
-    fn rruleset_parsing() {
+    fn rruleset_parsing_date() {
         "DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
+    }
+    
+    #[test]
+    fn rruleset_parsing_date_with_timezone() {
+        "DTSTART;TZID=\"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna\":20201111T160000\nRRULE:FREQ=WEEKLY;UNTIL=20210428T140000Z;INTERVAL=6;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
     }
 
 }
