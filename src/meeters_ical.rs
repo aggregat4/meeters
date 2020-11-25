@@ -3,7 +3,8 @@ extern crate rrule;
 use ical::parser::ical::component::IcalEvent;
 use ical::property::Property;
 use chrono::prelude::*;
-use chrono_tz::Tz;
+use chrono_tz::{Tz, UTC};
+use chrono_tz::Europe::Berlin;
 use std::fmt;
 use rrule::RRule;
 use rrule::RRuleSet;
@@ -33,8 +34,8 @@ pub struct Event {
     pub location: String,
     pub meeturl: String,
     pub all_day: bool,
-    pub start_timestamp: DateTime<FixedOffset>,
-    pub end_timestamp: DateTime<FixedOffset>,
+    pub start_timestamp: DateTime<Tz>,
+    pub end_timestamp: DateTime<Tz>,
     // TODO: more things like status?
 }
 
@@ -73,7 +74,7 @@ fn find_param<'a>(params: &'a Vec<(String, Vec<String>)>, name: &str) -> Option<
 * 
 * See https://tools.ietf.org/html/rfc5545#section-3.3.5
 */
-fn parse_ical_datetime(datetime: &str, tz: &FixedOffset) -> Result<DateTime<FixedOffset>, CalendarError> {
+fn parse_ical_datetime(datetime: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
     // TODO: implementation
     // this is where I left off: Plan: we get the timezone here that was determined by either having
     // a Z modifier indicating zulu time, or no timezone indicating local time or it has an explicit timzone indicator and then we can just use it
@@ -86,21 +87,21 @@ fn parse_ical_datetime(datetime: &str, tz: &FixedOffset) -> Result<DateTime<Fixe
 /**
 * If a property is a timestamp it can have 3 forms ( see https://tools.ietf.org/html/rfc5545#section-3.3.5 )
 */
-fn extract_ical_datetime(prop: &Property) -> Result<DateTime<FixedOffset>, CalendarError> {
+fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
     let date_time_str = prop.value.as_ref().unwrap();
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // TODO: timezone parsing at some point, for now just assume local
-        return parse_ical_datetime(&date_time_str, Local::now().offset());
+        return parse_ical_datetime(&date_time_str, &Berlin);
     } else {
         // It is either
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with("Z") {
-            return parse_ical_datetime(&date_time_str, &Utc.fix());
+            return parse_ical_datetime(&date_time_str, &UTC);
         } else {
-        // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
-        return parse_ical_datetime(&date_time_str, Local::now().offset());
+            // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
+            return parse_ical_datetime(&date_time_str, &Berlin);
         }
     }
 }
@@ -111,7 +112,7 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<FixedOffset>, Calen
 * 
 * See https://tools.ietf.org/html/rfc5545#section-3.3.4
 */
-fn parse_ical_date_notz(date: &str, tz: &FixedOffset) -> Result<DateTime<FixedOffset>, CalendarError> {
+fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
     // TODO: What time is assumed here by chrono and does that match the ical spec?
     return match NaiveDate::parse_from_str(date, "%Y%m%d") {
         Ok(d) => Ok(tz.from_local_datetime(&d.and_hms(0, 0, 0)).unwrap()),
@@ -119,13 +120,13 @@ fn parse_ical_date_notz(date: &str, tz: &FixedOffset) -> Result<DateTime<FixedOf
     }
 }
 
-fn extract_ical_date(prop: &Property) -> Result<DateTime<FixedOffset>, CalendarError> {
-    return parse_ical_date_notz(&prop.value.as_ref().unwrap(), Local::now().offset());
+fn extract_ical_date(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
+    return parse_ical_date_notz(&prop.value.as_ref().unwrap(), &Berlin);
 }
 
 fn extract_start_end_time(
     ical_event: &IcalEvent,
-) -> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>, bool), CalendarError> {
+) -> Result<(DateTime<Tz>, DateTime<Tz>, bool), CalendarError> {
     // we assume that DTSTART is mandatory, the spec sort of says that but also mentions something called
     // a "METHOD", ignoring that
     let start_property = find_property(&ical_event.properties, "DTSTART").unwrap();
