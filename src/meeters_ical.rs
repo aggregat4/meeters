@@ -3,6 +3,7 @@ extern crate rrule;
 use ical::parser::ical::component::IcalEvent;
 use ical::property::Property;
 use chrono::prelude::*;
+use chrono_tz::Tz;
 use std::fmt;
 use rrule::RRule;
 use rrule::RRuleSet;
@@ -181,35 +182,75 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
     // TODO: parse meetUrl from summary, description and location and consolidate
 }
 
+fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarError> {
+    // We need to compensate for some weaknesses in the rrule library
+    // by sanitising some date constructs and filtering out spurious ical fields.
+    let rrule_props = event.properties
+        .iter()
+        .filter(|p| p.name == "DTSTART" || p.name == "RRULE") // || p.name == "DTEND"
+        .map(|p| if p.name == "DTSTART" {
+            return Property {
+                name: p.name.clone(),
+                params: match &p.params {
+                    None => None,
+                    Some(params) => Some(params.iter().filter(|param| param.0 != "TZID").cloned().collect()),
+                },
+                value: p.value.clone(),
+            } 
+        } else { return p.clone() })
+        .collect::<Vec<Property>>();
+    let event_as_string = properties_to_string(&rrule_props);
+    match event_as_string.parse::<RRuleSet>() {
+        Ok(mut ruleset) => Ok(ruleset.all()),
+        Err(e) => Err(CalendarError { msg: format!("error in RRULE parsing: {}", e) })
+    }
+}
+
 pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     let mut reader = ical::IcalParser::new(text.as_bytes());
     match reader.next() {
         Some(result) => match result {
             Ok(calendar) => {
                 println!("Number of events: {:?}", calendar.events.len());
-                return calendar.events.into_iter().map(|e| {
-                    let mut rrule_props = e.properties
-                        .iter()
-                        .filter(|p| p.name == "DTSTART" || p.name == "RRULE") // || p.name == "DTEND"
-                        .cloned() // this is required because we have a vec of values before this and collect only works on references, maybe?
-                        .collect::<Vec<Property>>();
-                    rrule_props.sort_by(|a, b| if a.name == "DTSTART" { Ordering::Less } else if b.name == "DTSTART" { Ordering::Greater } else { Ordering::Equal });
-                    let event_as_string = properties_to_string(&rrule_props);
-                    match event_as_string.parse::<RRuleSet>() {
-                        Ok(mut ruleset) => {
-                            let rules = ruleset.all();
-                            if rules.len() > 0 {
-                                println!("Running rrule on {} gave {} rules", event_as_string, rules.len());
-                            }        
-                        }
-                        Err(e) => println!("Error building ruleset from {}: {}", event_as_string, e)
-                    }
-                    return parse_event(&e);
-                }).collect();
+                return calendar.events
+                    .into_iter()
+                    .map(|event| match parse_event(&event) {
+                        Ok(parsed_event) => Ok((event, parsed_event)),
+                        Err(e) => Err(e)
+                    } )
+                    .collect::<Result<Vec<(IcalEvent, Event)>, CalendarError>>() // will fail on the first parse error and return n error
+                    .and_then(|event_tuples| event_tuples
+                        .into_iter()
+                        .map(|(event, parsed_event)| match parse_occurrences(&event) {
+                            Ok(occurrences) => if occurrences.len() == 0 {
+                                Ok(vec![parsed_event])
+                            } else {
+                                Ok(occurrences
+                                    .into_iter()
+                                    .map(|datetime| Event {
+                                        summary: parsed_event.summary,
+                                        description: parsed_event.description,
+                                        location: parsed_event.location,
+                                        meeturl: parsed_event.meeturl,
+                                        all_day: parsed_event.all_day,
+                                        // TODO: fix our DateTimes to use real TimeZones instead of fixed offsets so we can use the occurrences
+                                        // start_timestamp: datetime,
+                                        // end_timestamp: DateTime<FixedOffset>,                                    
+                                    })
+                                    .collect()
+                                )
+                            },
+                            Err(e) => Err(e)
+                        })
+                        .collect::<Result<Vec<Vec<Event>>,CalendarError>>() // will fail on the first parse error and return n error
+                        .and_then(|event_instances| Ok(event_instances
+                            .into_iter()
+                            .flatten()
+                            .collect())
+                        )
+                    )
             }
-            Err(e) => Err(CalendarError {
-                msg: format!("error in ical parsing: {}", e),
-            }),
+            Err(e) => Err(CalendarError { msg: format!("error in ical parsing: {}", e) }),
         },
         None => return Ok(vec![]),
     }
