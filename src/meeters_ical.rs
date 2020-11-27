@@ -18,7 +18,7 @@ fn find_property_value(properties: &[Property], name: &str) -> Option<String> {
             return property.value.clone();
         }
     }
-    return None;
+    None
 }
 
 fn find_property<'a>(properties: &'a [Property], name: &str) -> Option<&'a Property> {
@@ -27,7 +27,7 @@ fn find_property<'a>(properties: &'a [Property], name: &str) -> Option<&'a Prope
             return Some(property);
         }
     }
-    return None;
+    None
 }
 
 fn find_param<'a>(params: &'a [(String, Vec<String>)], name: &str) -> Option<&'a [String]> {
@@ -37,7 +37,7 @@ fn find_param<'a>(params: &'a [(String, Vec<String>)], name: &str) -> Option<&'a
             return Some(values);
         }
     }
-    return None;
+    None
 }
 
 /// Parses datetimes of the format 'YYYYMMDDTHHMMSS'
@@ -47,7 +47,7 @@ fn parse_ical_datetime(datetime: &str, tz: &Tz) -> Result<DateTime<Tz>, Calendar
     // TODO: implementation
     // this is where I left off: Plan: we get the timezone here that was determined by either having
     // a Z modifier indicating zulu time, or no timezone indicating local time or it has an explicit timzone indicator and then we can just use it
-    return match NaiveDateTime::parse_from_str(&datetime, "%Y%m%dT%H%M%S") {
+    match NaiveDateTime::parse_from_str(&datetime, "%Y%m%dT%H%M%S") {
         Ok(d) => Ok(tz.from_local_datetime(&d).unwrap()),
         Err(_) => Err(CalendarError { msg: "Can't parse datetime string with tzid".to_string() })
     }
@@ -61,16 +61,16 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // TODO: timezone parsing at some point, for now just assume local
-        return parse_ical_datetime(&date_time_str, &Berlin);
+        parse_ical_datetime(&date_time_str, &Berlin)
     } else {
         // It is either
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
-            return parse_ical_datetime(&date_time_str, &UTC);
+            parse_ical_datetime(&date_time_str, &UTC)
         } else {
             // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
-            return parse_ical_datetime(&date_time_str, &Berlin);
+            parse_ical_datetime(&date_time_str, &Berlin)
         }
     }
 }
@@ -81,14 +81,14 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.4>
 fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
     // TODO: What time is assumed here by chrono and does that match the ical spec?
-    return match NaiveDate::parse_from_str(date, "%Y%m%d") {
+    match NaiveDate::parse_from_str(date, "%Y%m%d") {
         Ok(d) => Ok(tz.from_local_datetime(&d.and_hms(0, 0, 0)).unwrap()),
         Err(chrono_err) => Err(CalendarError { msg: format!("Can't parse date '{:?}' with cause: {:?}", date, chrono_err.to_string()) })
     }
 }
 
 fn extract_ical_date(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
-    return parse_ical_date_notz(&prop.value.as_ref().unwrap(), &Berlin);
+    parse_ical_date_notz(&prop.value.as_ref().unwrap(), &Berlin)
 }
 
 fn extract_start_end_time(
@@ -114,13 +114,13 @@ fn extract_start_end_time(
         // start property is a "DATE", which indicates a whole day or multi day event
         // see https://tools.ietf.org/html/rfc5545#section-3.6.1 and specifically the discussion on DTSTART
         let start_time = extract_ical_date(start_property)?;
-        return match end_property {
+        match end_property {
             Some(p) => extract_ical_date(p).map(|end_time| (start_time, end_time, true)),
             None => Ok((start_time, start_time, true))
         }
     } else {
         // not a whole day event, so real times, there should be an end time
-        return match end_property {
+        match end_property {
             Some(p) => {
                 let start_time = extract_ical_datetime(start_property)?;
                 let end_time = extract_ical_datetime(p)?;
@@ -135,7 +135,7 @@ fn parse_zoom_url(text: &str) -> Option<String> {
     lazy_static! {
         static ref ZOOM_URL_REGEX: regex::Regex = Regex::new(r"https?://[^\s]*zoom.us/j/[^\s]+").unwrap();
     }    
-    return ZOOM_URL_REGEX.find(text).map(|mat| mat.as_str().to_string());
+    ZOOM_URL_REGEX.find(text).map(|mat| mat.as_str().to_string())
 }
 
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1
@@ -146,7 +146,7 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
     let location = find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string());
     let (start_timestamp, end_timestamp, all_day) = extract_start_end_time(&ical_event)?; // ? short circuits the error
     let meeturl = parse_zoom_url(&summary).or_else(|| parse_zoom_url(&description)).or_else(|| parse_zoom_url(&location));
-    return Ok(Event {
+    Ok(Event {
         summary,
         description,
         location,
@@ -154,7 +154,7 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
         all_day,
         start_timestamp,
         end_timestamp,
-    });
+    })
 }
 
 fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarError> {
@@ -164,7 +164,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
         .iter()
         .filter(|p| p.name == "DTSTART" || p.name == "RRULE") // || p.name == "DTEND"
         .map(|p| if p.name == "DTSTART" {
-            return Property {
+            Property {
                 name: p.name.clone(),
                 params: match &p.params {
                     None => None,
@@ -172,7 +172,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 },
                 value: p.value.clone(),
             } 
-        } else { return p.clone() })
+        } else { p.clone() })
         .collect::<Vec<Property>>();
     let event_as_string = properties_to_string(&rrule_props);
     match event_as_string.parse::<RRuleSet>() {
@@ -187,7 +187,7 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
         Some(result) => match result {
             Ok(calendar) => {
                 println!("Number of events: {:?}", calendar.events.len());
-                return calendar.events
+                calendar.events
                     .into_iter()
                     .map(|event| match parse_event(&event) {
                         Ok(parsed_event) => Ok((event, parsed_event)),
@@ -217,27 +217,27 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                                 },
                             Err(e) => Err(e)
                         })
-                        .collect::<Result<Vec<Vec<Event>>,CalendarError>>() // will fail on the first parse error and return n error
-                        .and_then(|event_instances| Ok(event_instances.into_iter().flatten().collect())) // flatmap that shit
+                        .collect::<Result<Vec<Vec<Event>>,CalendarError>>()
+                        .map(|event_instances| event_instances.into_iter().flatten().collect()) // flatmap that shit
                     )
             }
             Err(e) => Err(CalendarError { msg: format!("error in ical parsing: {}", e) }),
         },
-        None => return Ok(vec![]),
+        None => Ok(vec![]),
     }
 }
 
 fn format_param_values(param_values: &[String]) -> String {
-    return param_values
+    param_values
         .iter()
         .map(|param_val| if param_val.contains(' ') { format!("\"{}\"", param_val) } else { param_val.to_string() } )
         .collect::<Vec<String>>()
-        .join(",");
+        .join(",")
 }
 
 fn params_to_string(params: &[(String, Vec<String>)]) -> String {
     if params.is_empty() {
-        return "".to_string();
+        "".to_string()
     } else {
         return format!(";{}",
             params
@@ -253,16 +253,16 @@ fn prop_to_string(prop: &Property) -> String {
 }
 
 fn properties_to_string(properties: &[Property]) -> String {
-    return properties
+    properties
         .iter() // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
         .map(|p| prop_to_string(&p))
         .collect::<Vec<String>>()
-        .join("\n");
+        .join("\n")
 }
 
 #[allow(dead_code)]
 fn ical_event_to_string(event: &IcalEvent) -> String {
-    return properties_to_string(&event.properties);
+    properties_to_string(&event.properties)
 }
 
 #[cfg(test)]

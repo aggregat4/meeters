@@ -28,5 +28,4 @@ pub struct Event {
     pub all_day: bool,
     pub start_timestamp: DateTime<Tz>,
     pub end_timestamp: DateTime<Tz>,
-    // TODO: more things like status?
 }

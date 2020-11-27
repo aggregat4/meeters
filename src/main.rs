@@ -16,7 +16,7 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
     if let Some(error) = response.synthetic_error() {
         return Err(CalendarError { msg: format!("Error getting ical from url: {}", error)});
     }
-    return Ok(response.into_string().unwrap());
+    Ok(response.into_string().unwrap())
 }
 
 fn start_calendar_work(url: String) {
@@ -49,7 +49,7 @@ fn create_indicator() -> AppIndicator {
     indicator.set_icon_full("rust-logo-64x64-blk", "icon");
     //indicator.set_label("Next meeting foobar 4 min", "8.8"); // does not get shown in XFCE
     //indicator.connect_activate
-    return indicator;
+    indicator
 }
 
 fn create_indicator_menu() -> gtk::Menu {
@@ -60,7 +60,7 @@ fn create_indicator_menu() -> gtk::Menu {
     });
     m.append(&mi);
     m.show_all();
-    return m;
+    m
 }
 
 fn main() {
