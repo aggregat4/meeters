@@ -7,15 +7,16 @@ use libappindicator::{AppIndicator, AppIndicatorStatus};
 use chrono::prelude::*;
 
 mod meeters_ical;
+mod domain;
 
 fn get_ical(url: &str) -> Result<String, reqwest::Error> {
     let body = reqwest::blocking::get(url)?;
     return body.text();
 }
   
-fn get_event_text(url: &str) -> Result<String, meeters_ical::CalendarError> {
+fn get_event_text(url: &str) -> Result<String, domain::CalendarError> {
     // the .or() invocation converts from the custom reqwest error to our standard CalendarError
-    return Ok(get_ical(url).or_else(|get_error| Err(meeters_ical::CalendarError { msg: format!("Error getting calendar: {}", get_error).to_string() }))?);
+    return Ok(get_ical(url).or_else(|get_error| Err(domain::CalendarError { msg: format!("Error getting calendar: {}", get_error).to_string() }))?);
 }
 
 fn start_calendar_work(url: String) {

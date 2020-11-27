@@ -1,43 +1,14 @@
 extern crate rrule;
 
+use chrono::Duration;
 use ical::parser::ical::component::IcalEvent;
 use ical::property::Property;
 use chrono::prelude::*;
 use chrono_tz::{Tz, UTC};
 use chrono_tz::Europe::Berlin;
-use std::fmt;
-use rrule::RRule;
 use rrule::RRuleSet;
-use std::cmp::Ordering;
 
-// From https://doc.rust-lang.org/stable/rust-by-example/error/multiple_error_types/define_error_type.html and message added
-#[derive(Debug, Clone)]
-pub struct CalendarError {
-    // Type "String" means that the struct owns and stores the string, if I would use a string reference (&str)
-    // I would also need to specify a lifecycle like  "msg: &'a str,". This is less storage
-    // but it means we can't just generate error messages on the fly that are not static
-    // If I _would_ use a refernce we need to suffix the CalendarError type with a lifetime like
-    // CalendarError<'a>
-    pub msg: String,
-}
-
-impl fmt::Display for CalendarError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error getting events: {}", self.msg)
-    }
-}
-
-#[derive(Debug)]
-pub struct Event {
-    pub summary: String,
-    pub description: String,
-    pub location: String,
-    pub meeturl: String,
-    pub all_day: bool,
-    pub start_timestamp: DateTime<Tz>,
-    pub end_timestamp: DateTime<Tz>,
-    // TODO: more things like status?
-}
+use crate::domain::*;
 
 fn find_property_value(properties: &Vec<Property>, name: &str) -> Option<String> {
     for property in properties {
@@ -218,7 +189,7 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                     .map(|event| match parse_event(&event) {
                         Ok(parsed_event) => Ok((event, parsed_event)),
                         Err(e) => Err(e)
-                    } )
+                    })
                     .collect::<Result<Vec<(IcalEvent, Event)>, CalendarError>>() // will fail on the first parse error and return n error
                     .and_then(|event_tuples| event_tuples
                         .into_iter()
@@ -229,14 +200,13 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                                 Ok(occurrences
                                     .into_iter()
                                     .map(|datetime| Event {
-                                        summary: parsed_event.summary,
-                                        description: parsed_event.description,
-                                        location: parsed_event.location,
-                                        meeturl: parsed_event.meeturl,
+                                        summary: parsed_event.summary.to_string(),
+                                        description: parsed_event.description.to_string(),
+                                        location: parsed_event.location.to_string(),
+                                        meeturl: parsed_event.meeturl.to_string(),
                                         all_day: parsed_event.all_day,
-                                        // TODO: fix our DateTimes to use real TimeZones instead of fixed offsets so we can use the occurrences
-                                        // start_timestamp: datetime,
-                                        // end_timestamp: DateTime<FixedOffset>,                                    
+                                        start_timestamp: datetime,
+                                        end_timestamp: datetime + Duration::seconds(parsed_event.end_timestamp.timestamp() - parsed_event.start_timestamp.timestamp()),
                                     })
                                     .collect()
                                 )
@@ -244,10 +214,7 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                             Err(e) => Err(e)
                         })
                         .collect::<Result<Vec<Vec<Event>>,CalendarError>>() // will fail on the first parse error and return n error
-                        .and_then(|event_instances| Ok(event_instances
-                            .into_iter()
-                            .flatten()
-                            .collect())
+                        .and_then(|event_instances| Ok(event_instances.into_iter().flatten().collect()) // flatmap that shit
                         )
                     )
             }
@@ -290,6 +257,7 @@ fn properties_to_string(properties: &Vec<Property>) -> String {
         .join("\n");
 }
 
+#[allow(dead_code)]
 fn ical_event_to_string(event: &IcalEvent) -> String {
     return properties_to_string(&event.properties);
 }
