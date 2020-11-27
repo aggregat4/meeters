@@ -155,7 +155,6 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
         start_timestamp: start_time,
         end_timestamp: end_time,
     });
-    // TODO: parse meetUrl from summary, description and location and consolidate
 }
 
 fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarError> {
