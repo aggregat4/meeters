@@ -6,6 +6,8 @@ use gtk::prelude::*;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 use chrono::prelude::*;
 
+use glib::{MainContext, Sender, Receiver};
+
 mod meeters_ical;
 mod domain;
 
@@ -19,26 +21,6 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
     Ok(response.into_string().unwrap())
 }
 
-fn start_calendar_work(url: String) {
-    // TODO: figure out this move crap
-    thread::spawn(move || loop {
-        match get_ical(&url).and_then(|t| meeters_ical::parse_events(&t)) {
-            Ok(events) => {
-                println!("Successfully got {:?} events", events.len());
-                let today_start = Local::now().date().and_hms(0, 0, 0);
-                let today_end = Local::now().date().and_hms(23, 59, 59);
-                let today_events = events
-                    .into_iter()
-                    .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
-                    .collect::<Vec<_>>();
-                println!("There are {} events for today: {:?}", today_events.len(), today_events);
-            },
-            Err(e) => println!("Error getting events: {:?}", e.msg),
-        }
-        thread::sleep(Duration::from_secs(10));
-    });
-}
-
 fn create_indicator() -> AppIndicator {
     let mut indicator = AppIndicator::new("rs-meetings", "");
     indicator.set_status(AppIndicatorStatus::Active);
@@ -46,7 +28,7 @@ fn create_indicator() -> AppIndicator {
     // for our purposes this should probably be a resource in the configuration somewhere
     let icon_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     indicator.set_icon_theme_path(icon_path.to_str().unwrap());
-    indicator.set_icon_full("rust-logo-64x64-blk", "icon");
+    indicator.set_icon_full("meeters-appindicator", "icon");
     //indicator.set_label("Next meeting foobar 4 min", "8.8"); // does not get shown in XFCE
     //indicator.connect_activate
     indicator
@@ -75,7 +57,41 @@ fn main() {
     if args.len() == 1 {
         panic!("Need a command line argument with the url of the ICS file")
     }
-    start_calendar_work(String::from(&args[1]));
+    
+    let (sender, receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
+    receiver.attach(None, move |text| {
+        if text == "appindicator-error" {
+            indicator.set_icon_full("meeters-appindicator-error", "icon");
+        } else if text == "appindicator-noerror" {
+            indicator.set_icon_full("meeters-appindicator", "icon");
+        }
+        glib::Continue(true)
+    });
+    // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
+    // (it requires static for the sender and I can't make that work yet)
+    thread::spawn(move || loop {
+        match get_ical(&String::from(&args[1])).and_then(|t| meeters_ical::parse_events(&t)) {
+            Ok(events) => {
+                sender.send("appindicator-noerror".to_string()).expect("Channel should be sendable");
+                println!("Successfully got {:?} events", events.len());
+                let today_start = Local::now().date().and_hms(0, 0, 0);
+                let today_end = Local::now().date().and_hms(23, 59, 59);
+                let today_events = events
+                    .into_iter()
+                    .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
+                    .collect::<Vec<_>>();
+                println!("There are {} events for today: {:?}", today_events.len(), today_events);
+            },
+            Err(e) => {
+                //indicator.set_icon_full("meeters-appindicator-error.png", "icon");
+                sender.send("appindicator-error".to_string()).expect("Channel should be sendable");
+                println!("Error getting events: {:?}", e.msg);
+            }
+        }
+        thread::sleep(Duration::from_secs(10));
+    });
+
+    // start_calendar_work(String::from(&args[1]), &sender);
     // start listening for messsages
     gtk::main();
 }
