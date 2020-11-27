@@ -59,6 +59,7 @@ fn main() {
     }
     
     let (sender, receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
+    // TODO: maybe use something more structure than strings here, maybe an enum?
     receiver.attach(None, move |text| {
         if text == "appindicator-error" {
             indicator.set_icon_full("meeters-appindicator-error", "icon");
@@ -83,15 +84,12 @@ fn main() {
                 println!("There are {} events for today: {:?}", today_events.len(), today_events);
             },
             Err(e) => {
-                //indicator.set_icon_full("meeters-appindicator-error.png", "icon");
                 sender.send("appindicator-error".to_string()).expect("Channel should be sendable");
                 println!("Error getting events: {:?}", e.msg);
             }
         }
         thread::sleep(Duration::from_secs(10));
     });
-
-    // start_calendar_work(String::from(&args[1]), &sender);
     // start listening for messsages
     gtk::main();
 }
