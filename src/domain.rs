@@ -24,7 +24,7 @@ pub struct Event {
     pub summary: String,
     pub description: String,
     pub location: String,
-    pub meeturl: String,
+    pub meeturl: Option<String>,
     pub all_day: bool,
     pub start_timestamp: DateTime<Tz>,
     pub end_timestamp: DateTime<Tz>,

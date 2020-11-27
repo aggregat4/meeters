@@ -9,10 +9,11 @@ edition = "2018"
 [dependencies]
 libappindicator = "0.5.2"
 gtk = "0.9.2"
-reqwest = { version = "0.10", features = ["blocking"] }
-tokio = { version = "0.3.3", features = ["full"] }
+ureq = "1.5.2"
 ical = "0.7.0"
 property = "0.3.3"
 chrono = "0.4.19"
 chrono-tz = "0.5.3"
 rrule = "0.3.4"
+regex ="1"
+lazy_static = "1.4.0"

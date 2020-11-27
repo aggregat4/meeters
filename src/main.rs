@@ -9,20 +9,20 @@ use chrono::prelude::*;
 mod meeters_ical;
 mod domain;
 
-fn get_ical(url: &str) -> Result<String, reqwest::Error> {
-    let body = reqwest::blocking::get(url)?;
-    return body.text();
-}
-  
-fn get_event_text(url: &str) -> Result<String, domain::CalendarError> {
-    // the .or() invocation converts from the custom reqwest error to our standard CalendarError
-    return Ok(get_ical(url).or_else(|get_error| Err(domain::CalendarError { msg: format!("Error getting calendar: {}", get_error).to_string() }))?);
+use domain::CalendarError;
+
+fn get_ical(url: &str) -> Result<String, CalendarError> {
+    let response = ureq::get(url).call();
+    if let Some(error) = response.synthetic_error() {
+        return Err(CalendarError { msg: format!("Error getting ical from url: {}", error)});
+    }
+    return Ok(response.into_string().unwrap());
 }
 
 fn start_calendar_work(url: String) {
     // TODO: figure out this move crap
     thread::spawn(move || loop {
-        match get_event_text(&url).and_then(|t| meeters_ical::parse_events(&t)) {
+        match get_ical(&url).and_then(|t| meeters_ical::parse_events(&t)) {
             Ok(events) => {
                 println!("Successfully got {:?} events", events.len());
                 let today_start = Local::now().date().and_hms(0, 0, 0);

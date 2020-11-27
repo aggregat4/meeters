@@ -1,5 +1,3 @@
-extern crate rrule;
-
 use chrono::Duration;
 use ical::parser::ical::component::IcalEvent;
 use ical::property::Property;
@@ -7,6 +5,8 @@ use chrono::prelude::*;
 use chrono_tz::{Tz, UTC};
 use chrono_tz::Europe::Berlin;
 use rrule::RRuleSet;
+use regex::Regex;
+use lazy_static::lazy_static;
 
 use crate::domain::*;
 
@@ -40,11 +40,9 @@ fn find_param<'a>(params: &'a Vec<(String, Vec<String>)>, name: &str) -> Option<
     return None;
 }
 
-/**
-* Parses datetimes of the format 'YYYYMMDDTHHMMSS'
-* 
-* See https://tools.ietf.org/html/rfc5545#section-3.3.5
-*/
+/// Parses datetimes of the format 'YYYYMMDDTHHMMSS'
+/// 
+/// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
 fn parse_ical_datetime(datetime: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
     // TODO: implementation
     // this is where I left off: Plan: we get the timezone here that was determined by either having
@@ -55,9 +53,9 @@ fn parse_ical_datetime(datetime: &str, tz: &Tz) -> Result<DateTime<Tz>, Calendar
     }
 }
 
-/**
-* If a property is a timestamp it can have 3 forms ( see https://tools.ietf.org/html/rfc5545#section-3.3.5 )
-*/
+/// If a property is a timestamp it can have 3 forms
+/// 
+/// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
 fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
     let date_time_str = prop.value.as_ref().unwrap();
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
@@ -77,12 +75,10 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
     }
 }
 
-/**
-* Parses an ical date with no timezone information into a chrono Local date, assuming that it is in the
-* local timezone. (This is probably wrong)
-* 
-* See https://tools.ietf.org/html/rfc5545#section-3.3.4
-*/
+/// Parses an ical date with no timezone information into a chrono Local date, assuming that it is in the
+/// local timezone. (This is probably wrong)
+/// 
+/// See <https://tools.ietf.org/html/rfc5545#section-3.3.4>
 fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
     // TODO: What time is assumed here by chrono and does that match the ical spec?
     return match NaiveDate::parse_from_str(date, "%Y%m%d") {
@@ -135,6 +131,13 @@ fn extract_start_end_time(
     }
 }
 
+fn parse_zoom_url(text: &str) -> Option<String> {
+    lazy_static! {
+        static ref ZOOM_URL_REGEX: regex::Regex = Regex::new(r"https?://[^\s]*zoom.us/j/[^\s]+").unwrap();
+    }    
+    return ZOOM_URL_REGEX.find(text).map(|mat| mat.as_str().to_string());
+}
+
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1
 fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
     let summary = find_property_value(&ical_event.properties, "SUMMARY").unwrap_or("".to_string());
@@ -142,11 +145,12 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
         find_property_value(&ical_event.properties, "SUMMARY").unwrap_or("".to_string());
     let location = find_property_value(&ical_event.properties, "SUMMARY").unwrap_or("".to_string());
     let (start_time, end_time, all_day) = extract_start_end_time(&ical_event)?; // ? short circuits the error
+    let meeturl = parse_zoom_url(&summary).or_else(|| parse_zoom_url(&description)).or_else(|| parse_zoom_url(&location));
     return Ok(Event {
         summary: summary,
         description: description,
         location: location,
-        meeturl: "".to_string(),
+        meeturl: meeturl,
         all_day: all_day,
         start_timestamp: start_time,
         end_timestamp: end_time,
@@ -194,28 +198,28 @@ pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                     .and_then(|event_tuples| event_tuples
                         .into_iter()
                         .map(|(event, parsed_event)| match parse_occurrences(&event) {
-                            Ok(occurrences) => if occurrences.len() == 0 {
-                                Ok(vec![parsed_event])
-                            } else {
-                                Ok(occurrences
-                                    .into_iter()
-                                    .map(|datetime| Event {
-                                        summary: parsed_event.summary.to_string(),
-                                        description: parsed_event.description.to_string(),
-                                        location: parsed_event.location.to_string(),
-                                        meeturl: parsed_event.meeturl.to_string(),
-                                        all_day: parsed_event.all_day,
-                                        start_timestamp: datetime,
-                                        end_timestamp: datetime + Duration::seconds(parsed_event.end_timestamp.timestamp() - parsed_event.start_timestamp.timestamp()),
-                                    })
-                                    .collect()
-                                )
-                            },
+                            Ok(occurrences) =>
+                                if occurrences.len() == 0 {
+                                    Ok(vec![parsed_event])
+                                } else {
+                                    Ok(occurrences
+                                        .into_iter()
+                                        .map(|datetime| Event {
+                                            summary: parsed_event.summary.to_string(),
+                                            description: parsed_event.description.to_string(),
+                                            location: parsed_event.location.to_string(),
+                                            meeturl: parsed_event.meeturl.clone(),
+                                            all_day: parsed_event.all_day,
+                                            start_timestamp: datetime,
+                                            end_timestamp: datetime + Duration::seconds(parsed_event.end_timestamp.timestamp() - parsed_event.start_timestamp.timestamp()),
+                                        })
+                                        .collect()
+                                    )
+                                },
                             Err(e) => Err(e)
                         })
                         .collect::<Result<Vec<Vec<Event>>,CalendarError>>() // will fail on the first parse error and return n error
-                        .and_then(|event_instances| Ok(event_instances.into_iter().flatten().collect()) // flatmap that shit
-                        )
+                        .and_then(|event_instances| Ok(event_instances.into_iter().flatten().collect())) // flatmap that shit
                     )
             }
             Err(e) => Err(CalendarError { msg: format!("error in ical parsing: {}", e) }),
