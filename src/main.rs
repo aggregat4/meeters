@@ -2,16 +2,16 @@ use std::env;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
+
 use gtk::prelude::*;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 use chrono::prelude::*;
+use directories::ProjectDirs;
 
-use glib::{MainContext, Sender, Receiver};
+use domain::CalendarError;
 
 mod meeters_ical;
 mod domain;
-
-use domain::CalendarError;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
     let response = ureq::get(url).call();
@@ -45,33 +45,42 @@ fn create_indicator_menu() -> gtk::Menu {
     m
 }
 
-fn main() {
-    // magic incantation
+fn load_config() -> std::io::Result<()> {
+    let proj_dirs = ProjectDirs::from("net", "aggregat4",  "meeters").expect("Project directory must be available");
+    let config_file = proj_dirs.config_dir().join("meeters_config.env");
+    if !config_file.exists() {
+        //fs::create_dir_all(config_dir)?;
+        panic!("Require the project configuration file to be present at {}", config_file.to_str().unwrap());
+    }
+    dotenv::from_path(config_file).expect("Can not load configuration file meeters_config.env");
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    load_config()?;
+    let ical_url = dotenv::var("ICAL_URL").expect("Expecting a configuration property with name ICAL_URL");
+    // magic incantation for gtk
     gtk::init().unwrap();
     // set up our widgets
     let mut indicator = create_indicator();
     let mut menu = create_indicator_menu();
     indicator.set_menu(&mut menu);
-    // start the background thread for calendar work
-    let args: Vec<String> = env::args().collect();
-    if args.len() == 1 {
-        panic!("Need a command line argument with the url of the ICS file")
-    }
-    
+    // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (sender, receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
     // TODO: maybe use something more structure than strings here, maybe an enum?
-    receiver.attach(None, move |text| {
-        if text == "appindicator-error" {
+    receiver.attach(None, move |msg| {
+        if msg == "appindicator-error" {
             indicator.set_icon_full("meeters-appindicator-error", "icon");
-        } else if text == "appindicator-noerror" {
+        } else if msg == "appindicator-noerror" {
             indicator.set_icon_full("meeters-appindicator", "icon");
         }
         glib::Continue(true)
     });
+    // start the background thread for calendar work   
     // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
     // (it requires static for the sender and I can't make that work yet)
     thread::spawn(move || loop {
-        match get_ical(&String::from(&args[1])).and_then(|t| meeters_ical::parse_events(&t)) {
+        match get_ical(&ical_url).and_then(|t| meeters_ical::parse_events(&t)) {
             Ok(events) => {
                 sender.send("appindicator-noerror".to_string()).expect("Channel should be sendable");
                 println!("Successfully got {:?} events", events.len());
@@ -92,4 +101,5 @@ fn main() {
     });
     // start listening for messsages
     gtk::main();
+    Ok(())
 }
