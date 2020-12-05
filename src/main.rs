@@ -1,7 +1,7 @@
 use std::env;
 use std::path::Path;
 use std::thread;
-use std::time::Duration;
+//use std::time::Duration;
 
 use gtk::prelude::*;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
@@ -84,12 +84,15 @@ fn main() -> std::io::Result<()> {
             Ok(events) => {
                 sender.send("appindicator-noerror".to_string()).expect("Channel should be sendable");
                 println!("Successfully got {:?} events", events.len());
-                let today_start = Local::now().date().and_hms(0, 0, 0);
-                let today_end = Local::now().date().and_hms(23, 59, 59);
+                let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
+                let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
                 let today_events = events
                     .into_iter()
                     .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
                     .collect::<Vec<_>>();
+                for ev in &today_events {
+                    println!("description: {}", ev.description);
+                }
                 println!("There are {} events for today: {:?}", today_events.len(), today_events);
             },
             Err(e) => {
@@ -97,7 +100,7 @@ fn main() -> std::io::Result<()> {
                 println!("Error getting events: {:?}", e.msg);
             }
         }
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(std::time::Duration::from_secs(10));
     });
     // start listening for messsages
     gtk::main();

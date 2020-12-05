@@ -1106,14 +1106,15 @@ dependencies = [
 
 [[package]]
 name = "rrule"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d6cdfafec0a1c9af494cd0ce7d45eff55a6706748e2a655f4cc66fc15f0a994"
+checksum = "58d84cae300c7bb01c4be310a74f37d98eb3825f350115d09c0bae4ee1fb9255"
 dependencies = [
  "chrono",
  "chrono-tz",
  "lazy_static",
  "regex",
+ "serde",
 ]
 
 [[package]]

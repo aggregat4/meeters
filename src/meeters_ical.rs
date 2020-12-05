@@ -4,7 +4,7 @@ use ical::property::Property;
 use chrono::prelude::*;
 use chrono_tz::{Tz, UTC};
 use chrono_tz::Europe::Berlin;
-use rrule::RRuleSet;
+use rrule::{RRuleSet, Options, RRule};
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -43,12 +43,12 @@ fn find_param<'a>(params: &'a [(String, Vec<String>)], name: &str) -> Option<&'a
 /// Parses datetimes of the format 'YYYYMMDDTHHMMSS'
 /// 
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
-fn parse_ical_datetime(datetime: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
+fn parse_ical_datetime(datetime: &str, tz: &Tz, target_tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
     // TODO: implementation
     // this is where I left off: Plan: we get the timezone here that was determined by either having
     // a Z modifier indicating zulu time, or no timezone indicating local time or it has an explicit timzone indicator and then we can just use it
     match NaiveDateTime::parse_from_str(&datetime, "%Y%m%dT%H%M%S") {
-        Ok(d) => Ok(tz.from_local_datetime(&d).unwrap()),
+        Ok(d) => Ok(tz.from_local_datetime(&d).unwrap().with_timezone(target_tz)),
         Err(_) => Err(CalendarError { msg: "Can't parse datetime string with tzid".to_string() })
     }
 }
@@ -61,16 +61,17 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // TODO: timezone parsing at some point, for now just assume local
-        parse_ical_datetime(&date_time_str, &Berlin)
+        parse_ical_datetime(&date_time_str, &Berlin, &Berlin)
     } else {
         // It is either
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
-            parse_ical_datetime(&date_time_str, &UTC)
+            println!("Parsing a datetime with UTC because it contains a Z");
+            parse_ical_datetime(&date_time_str, &UTC, &Berlin)
         } else {
             // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
-            parse_ical_datetime(&date_time_str, &Berlin)
+            parse_ical_datetime(&date_time_str, &Berlin, &Berlin)
         }
     }
 }
@@ -133,19 +134,24 @@ fn extract_start_end_time(
 
 fn parse_zoom_url(text: &str) -> Option<String> {
     lazy_static! {
-        static ref ZOOM_URL_REGEX: regex::Regex = Regex::new(r"https?://[^\s]*zoom.us/j/[^\s]+").unwrap();
+        static ref ZOOM_URL_REGEX: regex::Regex = Regex::new(r"https?://[^\s]*zoom.us/(j|my)/[^\s\n\r<>]+").unwrap();
     }    
     ZOOM_URL_REGEX.find(text).map(|mat| mat.as_str().to_string())
 }
 
+fn sanitise_string(input: &str) -> String {
+    input.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+}
+
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1
 fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
-    let summary = find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string());
-    let description =
-        find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string());
-    let location = find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string());
+    let summary = sanitise_string(&find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string()));
+    let description = sanitise_string(&find_property_value(&ical_event.properties, "DESCRIPTION").unwrap_or_else(|| "".to_string()));
+    println!("Ends with escaped newline? {}", description.ends_with("\\n"));
+    println!("zoom regex on description: {:?}", parse_zoom_url(&description));
+    let location = sanitise_string(&find_property_value(&ical_event.properties, "LOCATION").unwrap_or_else(|| "".to_string()));
     let (start_timestamp, end_timestamp, all_day) = extract_start_end_time(&ical_event)?; // ? short circuits the error
-    let meeturl = parse_zoom_url(&summary).or_else(|| parse_zoom_url(&description)).or_else(|| parse_zoom_url(&location));
+    let meeturl = parse_zoom_url(&location).or_else(|| parse_zoom_url(&summary)).or_else(|| parse_zoom_url(&description));
     Ok(Event {
         summary,
         description,
@@ -168,12 +174,21 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 name: p.name.clone(),
                 params: match &p.params {
                     None => None,
+                    // this is cleanup: rrule can not deal with explicit long TZID timezone identifiers and we just remove it here, this means that all the dates are in the wrong timezone though...
                     Some(params) => Some(params.iter().filter(|param| param.0 != "TZID").cloned().collect()),
                 },
                 value: p.value.clone(),
-            } 
+            }
         } else { p.clone() })
         .collect::<Vec<Property>>();
+    // // Build options for rrule that occurs weekly on Tuesday and Wednesday
+    // let mut rrule_options = Options::new()
+    //     .dtstart(Local::now().date().and_hms(0, 0, 0).with_timezone(&Berlin))
+    //     .build()
+    //     .unwrap();
+
+    // // Construct `RRule` from options
+    // let mut rrule = RRule::new(rrule_options);
     let event_as_string = properties_to_string(&rrule_props);
     match event_as_string.parse::<RRuleSet>() {
         Ok(mut ruleset) => Ok(ruleset.all()),
@@ -315,9 +330,9 @@ mod tests {
         "DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
     }
     
-    #[test]
-    fn rruleset_parsing_date_with_timezone() {
-        "DTSTART;TZID=\"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna\":20201111T160000\nRRULE:FREQ=WEEKLY;UNTIL=20210428T140000Z;INTERVAL=6;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
-    }
+    // #[test]
+    // fn rruleset_parsing_date_with_timezone() {
+    //     "DTSTART;TZID=\"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna\":20201111T160000\nRRULE:FREQ=WEEKLY;UNTIL=20210428T140000Z;INTERVAL=6;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
+    // }
 
 }
