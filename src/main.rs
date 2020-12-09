@@ -37,7 +37,7 @@ fn create_indicator() -> AppIndicator {
 
 
 
-fn create_indicator_menu(events: &Vec<domain::Event>) -> gtk::Menu {
+fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     let m = gtk::Menu::new();
     if events.is_empty() {
         // let mut label = Label::new(None);
@@ -71,26 +71,23 @@ fn main() -> std::io::Result<()> {
     gtk::init().unwrap();
     // set up our widgets
     let mut indicator = create_indicator();
-    let mut menu = create_indicator_menu(&vec![]);
+    let mut menu = create_indicator_menu(&[]);
     indicator.set_menu(&mut menu);
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
-    let (status_sender, status_receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
-    let (events_sender, events_receiver) = glib::MainContext::channel::<Vec<domain::Event>>(glib::PRIORITY_DEFAULT);
-    status_receiver.attach(None, move |msg| {
-        if msg == "appindicator-error" {
-            indicator.set_icon_full("meeters-appindicator-error", "icon");
-        } else if msg == "appindicator-noerror" {
-            indicator.set_icon_full("meeters-appindicator", "icon");
-        }
-        glib::Continue(true)
-    });
-    // TODO: refactor the message channel to have one kind of message but it has to express  sucess or failure and wrap the events structure, then we can avoid have to receive multiple times and modify the appindicator
-    events_receiver.attach(None, move |events| {
-        // TODO: update the menu to reflect all the events or that we have no events
-        if events.is_empty() {
-            indicator.set_menu(&mut create_indicator_menu(&vec![]));
-        } else {
-            indicator.set_menu(&mut create_indicator_menu(&events));
+    // let (status_sender, status_receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
+    let (events_sender, events_receiver) = glib::MainContext::channel::<Result<Vec<domain::Event>, ()>>(glib::PRIORITY_DEFAULT);
+    events_receiver.attach(None, move |event_result| {
+        match event_result {
+            Ok(events) => { 
+                indicator.set_icon_full("meeters-appindicator", "icon");
+                // TODO: update the menu to reflect all the events or that we have no events
+                if events.is_empty() {
+                    indicator.set_menu(&mut create_indicator_menu(&[]));
+                } else {
+                    indicator.set_menu(&mut create_indicator_menu(&events));
+                }
+            },
+            Err(e) => indicator.set_icon_full("meeters-appindicator-error", "icon")
         }
         glib::Continue(true)
     });
@@ -100,7 +97,6 @@ fn main() -> std::io::Result<()> {
     thread::spawn(move || loop {
         match get_ical(&ical_url).and_then(|t| meeters_ical::parse_events(&t)) {
             Ok(events) => {
-                status_sender.send("appindicator-noerror".to_string()).expect("Channel should be sendable");
                 println!("Successfully got {:?} events", events.len());
                 // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
                 // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
@@ -114,10 +110,11 @@ fn main() -> std::io::Result<()> {
                     println!("description: {}", ev.description);
                 }
                 println!("There are {} events for today: {:?}", today_events.len(), today_events);
-                events_sender.send(today_events).expect("Channel should be sendable");
+                events_sender.send(Ok(today_events)).expect("Channel should be sendable");
             },
             Err(e) => {
-                status_sender.send("appindicator-error".to_string()).expect("Channel should be sendable");
+                // TODO: maybe implement logging to some standard dir location and return more of an error for a tooltip
+                events_sender.send(Err(())).expect("Channel should be sendable");
                 println!("Error getting events: {:?}", e.msg);
             }
         }
