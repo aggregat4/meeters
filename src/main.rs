@@ -40,14 +40,17 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
         let label = Label::new(None);
         label.set_markup("<b>No Events Today</b>");
         let item = gtk::MenuItem::new();
+        // item.set_hexpand(true);
+        item.set_halign(gtk::Align::Start);
         item.add(&label);
         m.append(&item);
-
     } else {
         for event in events {
             let label = Label::new(None);
-            label.set_markup(&format!("<b>{}</b>", &event.summary));
+            label.set_markup(&format!("{} - {}: <b>{}</b>", &event.start_timestamp.format("%H:%M"), &event.end_timestamp.format("%H:%M"), &event.summary));
             let item = gtk::MenuItem::new();
+            // item.set_hexpand(true);
+            item.set_halign(gtk::Align::Start);
             item.add(&label);
             m.append(&item);
         }
@@ -123,9 +126,9 @@ fn main() -> std::io::Result<()> {
                 println!("Error getting events: {:?}", e.msg);
             }
         }
-        thread::sleep(std::time::Duration::from_secs(10));
+        thread::sleep(std::time::Duration::from_secs(30));
     });
-    // start listening for messsages
+    // start listening for messages
     gtk::main();
     Ok(())
 }
