@@ -1,6 +1,6 @@
-use std::fmt;
 use chrono::prelude::*;
 use chrono_tz::Tz;
+use std::fmt;
 
 // From https://doc.rust-lang.org/stable/rust-by-example/error/multiple_error_types/define_error_type.html and message added
 #[derive(Debug, Clone)]
