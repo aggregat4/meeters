@@ -5,7 +5,7 @@ use std::thread;
 use chrono::prelude::*;
 use directories::ProjectDirs;
 use gtk::prelude::*;
-use gtk::Label;
+use gtk::{Label, Menu};
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 
 use domain::CalendarError;
@@ -35,7 +35,7 @@ fn create_indicator() -> AppIndicator {
 }
 
 fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
-    let m = gtk::Menu::new();
+    let m: Menu = gtk::Menu::new();
     if events.is_empty() {
         let label = Label::new(None);
         label.set_markup("<b>No Events Today</b>");
