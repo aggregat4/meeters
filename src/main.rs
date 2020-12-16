@@ -47,12 +47,17 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     } else {
         for event in events {
             let label = Label::new(None);
-            label.set_markup(&format!(
-                "{} - {}: <b>{}</b>",
-                &event.start_timestamp.format("%H:%M"),
-                &event.end_timestamp.format("%H:%M"),
-                &event.summary
-            ));
+            let time_string = if event.start_timestamp.time() == event.end_timestamp.time() {
+                "All Day".to_owned()
+            } else {
+                format!(
+                    "{} - {}",
+                    &event.start_timestamp.format("%H:%M"),
+                    &event.end_timestamp.format("%H:%M")
+                )
+                .to_owned()
+            };
+            label.set_markup(&format!("{}: <b>{}</b>", time_string, &event.summary));
             let item = gtk::MenuItem::new();
             // item.set_hexpand(true);
             item.set_halign(gtk::Align::Start);
@@ -124,10 +129,11 @@ fn main() -> std::io::Result<()> {
                 // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
                 let today_start = Local::now().date().and_hms(0, 0, 0);
                 let today_end = Local::now().date().and_hms(23, 59, 59);
-                let today_events = events
+                let mut today_events = events
                     .into_iter()
                     .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
                     .collect::<Vec<_>>();
+                today_events.sort_by(|a, b| Ord::cmp(&a.start_timestamp, &b.start_timestamp));
                 println!(
                     "There are {} events for today: {:?}",
                     today_events.len(),
