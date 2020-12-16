@@ -4,7 +4,7 @@ use ical::property::Property;
 use chrono::prelude::*;
 use chrono_tz::{Tz, UTC};
 use chrono_tz::Europe::Berlin;
-use rrule::{RRuleSet, Options, RRule};
+use rrule::RRuleSet;
 use regex::Regex;
 use lazy_static::lazy_static;
 
@@ -67,7 +67,6 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
-            println!("Parsing a datetime with UTC because it contains a Z");
             parse_ical_datetime(&date_time_str, &UTC, &Berlin)
         } else {
             // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
@@ -147,8 +146,6 @@ fn sanitise_string(input: &str) -> String {
 fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
     let summary = sanitise_string(&find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string()));
     let description = sanitise_string(&find_property_value(&ical_event.properties, "DESCRIPTION").unwrap_or_else(|| "".to_string()));
-    println!("Ends with escaped newline? {}", description.ends_with("\\n"));
-    println!("zoom regex on description: {:?}", parse_zoom_url(&description));
     let location = sanitise_string(&find_property_value(&ical_event.properties, "LOCATION").unwrap_or_else(|| "".to_string()));
     let (start_timestamp, end_timestamp, all_day) = extract_start_end_time(&ical_event)?; // ? short circuits the error
     let meeturl = parse_zoom_url(&location).or_else(|| parse_zoom_url(&summary)).or_else(|| parse_zoom_url(&description));
@@ -325,14 +322,22 @@ mod tests {
         assert_eq!("FOO:bar\nbaz:qux", ical_event_to_string(&event));
     }
     
+    // Fixed: https://github.com/fmeringdal/rust_rrule/issues/2
     #[test]
     fn rruleset_parsing_date() {
         "DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
     }
     
+    // New feature request: https://github.com/fmeringdal/rust_rrule/issues/3
     // #[test]
     // fn rruleset_parsing_date_with_timezone() {
     //     "DTSTART;TZID=\"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna\":20201111T160000\nRRULE:FREQ=WEEKLY;UNTIL=20210428T140000Z;INTERVAL=6;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
     // }
+    
+    // https://github.com/fmeringdal/rust_rrule/issues/5
+    #[test]
+    fn rruleset_monthly_first_wednesday() {
+        println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap().all());
+    }
 
 }

@@ -30,19 +30,27 @@ fn create_indicator() -> AppIndicator {
     let icon_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     indicator.set_icon_theme_path(icon_path.to_str().unwrap());
     indicator.set_icon_full("meeters-appindicator", "icon");
-    //indicator.set_label("Next meeting foobar 4 min", "8.8"); // does not get shown in XFCE
-    //indicator.connect_activate
     indicator
 }
-
 
 
 fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     let m = gtk::Menu::new();
     if events.is_empty() {
-        // let mut label = Label::new(None);
-        // label.set_markup("<b>No Events Today</b>");
-        m.append(&gtk::MenuItem::with_label("<b>No Events Today</b>"));
+        let label = Label::new(None);
+        label.set_markup("<b>No Events Today</b>");
+        let item = gtk::MenuItem::new();
+        item.add(&label);
+        m.append(&item);
+
+    } else {
+        for event in events {
+            let label = Label::new(None);
+            label.set_markup(&format!("<b>{}</b>", &event.summary));
+            let item = gtk::MenuItem::new();
+            item.add(&label);
+            m.append(&item);
+        }
     }
     let mi = gtk::MenuItem::with_label("Quit");
     mi.connect_activate(|_| {
@@ -87,7 +95,7 @@ fn main() -> std::io::Result<()> {
                     indicator.set_menu(&mut create_indicator_menu(&events));
                 }
             },
-            Err(e) => indicator.set_icon_full("meeters-appindicator-error", "icon")
+            Err(_) => indicator.set_icon_full("meeters-appindicator-error", "icon")
         }
         glib::Continue(true)
     });
@@ -106,9 +114,6 @@ fn main() -> std::io::Result<()> {
                     .into_iter()
                     .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
                     .collect::<Vec<_>>();
-                for ev in &today_events {
-                    println!("description: {}", ev.description);
-                }
                 println!("There are {} events for today: {:?}", today_events.len(), today_events);
                 events_sender.send(Ok(today_events)).expect("Channel should be sendable");
             },
