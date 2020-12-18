@@ -19,7 +19,7 @@ impl fmt::Display for CalendarError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Event {
     pub summary: String,
     pub description: String,

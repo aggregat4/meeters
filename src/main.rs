@@ -5,10 +5,11 @@ use std::thread;
 use chrono::prelude::*;
 use directories::ProjectDirs;
 use gtk::prelude::*;
-use gtk::{Label, Menu};
+use gtk::Menu;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 
 use domain::CalendarError;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod domain;
 mod meeters_ical;
@@ -37,16 +38,20 @@ fn create_indicator() -> AppIndicator {
 fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     let m: Menu = gtk::Menu::new();
     if events.is_empty() {
-        let label = Label::new(None);
-        label.set_markup("<b>No Events Today</b>");
-        let item = gtk::MenuItem::new();
-        // item.set_hexpand(true);
-        item.set_halign(gtk::Align::Start);
-        item.add(&label);
+        let item = gtk::MenuItem::with_label("test");
+        let label = item.get_child().unwrap();
+        (label.downcast::<gtk::Label>())
+            .unwrap()
+            .set_markup("<b>No Events Today</b>");
+        // let label = Label::new(None);
+        // label.set_markup("<b>No Events Today</b>");
+        // let item = gtk::MenuItem::new();
+        // // item.set_hexpand(true);
+        // item.set_halign(gtk::Align::Start);
+        // item.add(&label);
         m.append(&item);
     } else {
         for event in events {
-            let label = Label::new(None);
             let time_string = if event.start_timestamp.time() == event.end_timestamp.time() {
                 "All Day".to_owned()
             } else {
@@ -57,11 +62,39 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
                 )
                 .to_owned()
             };
-            label.set_markup(&format!("{}: <b>{}</b>", time_string, &event.summary));
-            let item = gtk::MenuItem::new();
-            // item.set_hexpand(true);
-            item.set_halign(gtk::Align::Start);
-            item.add(&label);
+            let meeturl_string = match &event.meeturl {
+                Some(_) => " (Zoom)",
+                None => "",
+            };
+            let label_string = format!(
+                "{}: <b>{}</b>{}",
+                time_string, &event.summary, meeturl_string
+            );
+            // We need to actually create a menu item with a dummy label, then get that child
+            // element, cast it to an actual label and then modify its markup to make sure we get
+            // menu items that are left aligned but expand to fill horizontal space
+            // The first attempt to create an empty item and then add a label caused those items
+            // to have text that was only selectable/highlighted until the end of the text but not
+            // the end of the menu item
+            let item = gtk::MenuItem::with_label("Test");
+            let label = item.get_child().unwrap().downcast::<gtk::Label>().unwrap();
+            label.set_markup(&label_string);
+            let new_event = (*event).clone();
+            if new_event.meeturl.is_some() {
+                item.connect_activate(move |_clicked_item| {
+                    match gtk::show_uri(
+                        None,
+                        &new_event.meeturl.as_ref().unwrap(),
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time must flow")
+                            .as_secs() as u32,
+                    ) {
+                        Ok(_) => (),
+                        Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
+                    }
+                });
+            }
             m.append(&item);
         }
     }
