@@ -184,7 +184,7 @@ fn main() -> std::io::Result<()> {
                 println!("Error getting events: {:?}", e.msg);
             }
         }
-        thread::sleep(std::time::Duration::from_secs(30));
+        thread::sleep(std::time::Duration::from_secs(60 * 2));
     });
     // start listening for messages
     gtk::main();
