@@ -2,11 +2,12 @@ use chrono::prelude::*;
 use chrono::Duration;
 use chrono_tz::Europe::Berlin;
 use chrono_tz::{Tz, UTC};
-use ical::parser::ical::component::IcalEvent;
+use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
 use lazy_static::lazy_static;
 use regex::Regex;
 use rrule::RRuleSet;
+use std::collections::HashMap;
 
 use crate::domain::*;
 
@@ -108,6 +109,7 @@ fn extract_start_end_time(
 ) -> Result<(DateTime<Tz>, DateTime<Tz>, bool), CalendarError> {
     // we assume that DTSTART is mandatory, the spec sort of says that but also mentions something called
     // a "METHOD", ignoring that
+    // TODO: do manual TZ detection and map to the correct one instead of defaulting to Berlin
     let start_property = find_property(&ical_event.properties, "DTSTART").unwrap();
     let end_property = find_property(&ical_event.properties, "DTEND");
     // The start property can be a "date":
@@ -203,6 +205,11 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                     params: match &p.params {
                         None => None,
                         // this is cleanup: rrule can not deal with explicit long TZID timezone identifiers and we just remove it here, this means that all the dates are in the wrong timezone though...
+                        // TODO: deal with wrong timezones somehow (maybe just all set to local?)
+                        // TODO: do manual TZ detection and map to the correct one instead of defaulting to Berlin
+                        // first get the TZID parameter, map to real timezone then rewrite the date
+                        // value to a local date in the correct timezone (for example if DTSTART
+                        // is UTC, just read and convert to local TZ then write back that value here)
                         Some(params) => Some(
                             params
                                 .iter()
@@ -218,85 +225,148 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
             }
         })
         .collect::<Vec<Property>>();
-    // // Build options for rrule that occurs weekly on Tuesday and Wednesday
-    // let mut rrule_options = Options::new()
-    //     .dtstart(Local::now().date().and_hms(0, 0, 0).with_timezone(&Berlin))
-    //     .build()
-    //     .unwrap();
-
-    // // Construct `RRule` from options
-    // let mut rrule = RRule::new(rrule_options);
     let event_as_string = properties_to_string(&rrule_props);
     match event_as_string.parse::<RRuleSet>() {
-        Ok(mut ruleset) => Ok(ruleset.all()),
+        Ok(mut ruleset) => Ok(ruleset
+            .all()
+            .iter()
+            .map(|dt| {
+                // rrule does not understand TZ strings and we strip those beforehand
+                // all these dates are UTC and we hard convert them to the local timezone
+                // just so we can work with this. This needs to be fixed of course.
+                // Also converting by going to string and back since I can't deal with chrono correctly apparently
+                Berlin
+                    .from_local_datetime(
+                        &NaiveDateTime::parse_from_str(
+                            &*format!("{}", dt.format("%Y%m%dT%H%M%S")),
+                            "%Y%m%dT%H%M%S",
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap()
+            })
+            .collect()),
         Err(e) => Err(CalendarError {
             msg: format!("error in RRULE parsing: {}", e),
         }),
     }
 }
 
-pub fn parse_events(text: &str) -> Result<Vec<Event>, CalendarError> {
+fn find_modifying_events(events: &[(IcalEvent, Event)]) -> HashMap<String, (IcalEvent, Event)> {
+    // Create a map of all modifying events so we can correct recurring ocurrences later
+    let mut modifying_events: HashMap<String, (IcalEvent, Event)> = HashMap::new();
+    for (ical_event, event) in events {
+        // presense of a RECURRENCE-ID property is the trigger to know this is a modifying event
+        if let Some(recurrence_id_property) = find_property(&ical_event.properties, "RECURRENCE-ID")
+        {
+            match extract_ical_datetime(&recurrence_id_property) {
+                Ok(_) => {
+                    find_property_value(&ical_event.properties, "UID").and_then(|uid| {
+                        modifying_events.insert(uid, (ical_event.clone(), event.clone()))
+                    });
+                }
+                Err(e) => println!("Can't parse a recurrence id as datetime: {:?}", e),
+            }
+        }
+    }
+    modifying_events
+}
+
+fn parse_calendar(text: &str) -> Result<Option<IcalCalendar>, CalendarError> {
     let mut reader = ical::IcalParser::new(text.as_bytes());
     match reader.next() {
         Some(result) => match result {
-            Ok(calendar) => {
-                println!("Number of events: {:?}", calendar.events.len());
-                calendar
-                    .events
-                    .into_iter()
-                    .map(|event| match parse_event(&event) {
-                        Ok(parsed_event) => Ok((event, parsed_event)),
-                        Err(e) => Err(e),
-                    })
-                    .collect::<Result<Vec<(IcalEvent, Event)>, CalendarError>>() // will fail on the first parse error and return n error
-                    .and_then(
-                        |event_tuples| {
-                            event_tuples
-                                .into_iter()
-                                .map(|(event, parsed_event)| match parse_occurrences(&event) {
-                                    Ok(occurrences) => {
-                                        if occurrences.is_empty() {
-                                            Ok(vec![parsed_event])
-                                        } else {
-                                            Ok(occurrences
-                                                .into_iter()
-                                                .map(|datetime| {
-                                                    // we need to calculate this occurrence's end time by adding the duration of the original event to this particular start time
-                                                    let end_time = datetime.clone()
-                                                        + Duration::seconds(
-                                                            parsed_event.end_timestamp.timestamp()
-                                                                - parsed_event
-                                                                    .start_timestamp
-                                                                    .timestamp(),
-                                                        );
-                                                    Event {
-                                                        summary: parsed_event.summary.to_string(),
-                                                        description: parsed_event
-                                                            .description
-                                                            .to_string(),
-                                                        location: parsed_event.location.to_string(),
-                                                        meeturl: parsed_event.meeturl.clone(),
-                                                        all_day: parsed_event.all_day,
-                                                        start_timestamp: datetime,
-                                                        end_timestamp: end_time,
-                                                    }
-                                                })
-                                                .collect())
-                                        }
-                                    }
-                                    Err(e) => Err(e),
-                                })
-                                .collect::<Result<Vec<Vec<Event>>, CalendarError>>()
-                                .map(|event_instances| {
-                                    event_instances.into_iter().flatten().collect()
-                                })
-                        }, // flatmap that shit
-                    )
-            }
+            Ok(calendar) => Ok(Some(calendar)),
             Err(e) => Err(CalendarError {
                 msg: format!("error in ical parsing: {:?}", e),
             }),
         },
+        None => Ok(None),
+    }
+}
+
+fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, CalendarError> {
+    calendar
+        .events
+        .into_iter()
+        .map(|event| match parse_event(&event) {
+            Ok(parsed_event) => Ok((event, parsed_event)),
+            Err(e) => Err(e),
+        })
+        .collect::<Result<Vec<(IcalEvent, Event)>, CalendarError>>() // will fail on the first parse error and return an error
+}
+
+pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
+    match parse_calendar(text)? {
+        Some(calendar) => {
+            let event_tuples = parse_events(calendar)?;
+            // I need to clone this because apparently it otherwise complains about the event_tuples being moved and borrowed and I don't understand that
+            let cloned_events = event_tuples.clone();
+            let modifying_events = find_modifying_events(&cloned_events);
+            // Calculate occurrences for repeating events
+            event_tuples
+                .into_iter()
+                .map(
+                    |(ical_event, parsed_event)| match parse_occurrences(&ical_event) {
+                        Ok(occurrences) => {
+                            if occurrences.is_empty() {
+                                Ok(vec![parsed_event])
+                            } else {
+                                Ok(occurrences
+                                    .into_iter()
+                                    .map(|datetime| {
+                                        // We need to figure out whether the occurrence can be used as such or whether it was changed by a modifying event
+                                        // We assume that each ical_event that is a recurring event has a UID, otherwise the unwrap will fail here.
+                                        // Needs more error handling?
+                                        let occurrence_uid =
+                                            find_property_value(&ical_event.properties, "UID")
+                                                .unwrap();
+                                        if modifying_events.contains_key(&occurrence_uid) {
+                                            let (modifying_ical_event, modifying_event) =
+                                                modifying_events.get(&occurrence_uid).unwrap();
+                                            // since these modifying events are constructed before and are assumed to have an occurence-id we just unwrap here
+                                            let recurrence_id_property = find_property(
+                                                &modifying_ical_event.properties,
+                                                "RECURRENCE-ID",
+                                            )
+                                            .unwrap();
+                                            let recurrence_datetime =
+                                                extract_ical_datetime(recurrence_id_property)
+                                                    .unwrap();
+                                            // println!("Modifying event timestamp: {}", recurrence_datetime);
+                                            // println!("Original event occurrence timestamp: {}", datetime);
+                                            if datetime == recurrence_datetime {
+                                                // println!("Replacing an event '{}' with a modifying event", parsed_event.summary);
+                                                return modifying_event.clone();
+                                            }
+                                        }
+                                        // we need to calculate this occurrence's end time by adding the duration of the original event to this particular start time
+                                        let end_time = datetime
+                                            + Duration::seconds(
+                                                parsed_event.end_timestamp.timestamp()
+                                                    - parsed_event.start_timestamp.timestamp(),
+                                            );
+                                        Event {
+                                            summary: parsed_event.summary.to_string(),
+                                            description: parsed_event.description.to_string(),
+                                            location: parsed_event.location.to_string(),
+                                            meeturl: parsed_event.meeturl.clone(),
+                                            all_day: parsed_event.all_day,
+                                            start_timestamp: datetime,
+                                            end_timestamp: end_time,
+                                        }
+                                    })
+                                    .collect())
+                            }
+                        }
+                        Err(e) => Err(e),
+                    },
+                )
+                .collect::<Result<Vec<Vec<Event>>, CalendarError>>()
+                .map(|event_instances| {
+                    event_instances.into_iter().flatten().collect() // flatmap that shit
+                })
+        }
         None => Ok(vec![]),
     }
 }

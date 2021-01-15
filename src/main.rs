@@ -51,6 +51,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
         // item.add(&label);
         m.append(&item);
     } else {
+        let now = Local::now();
         for event in events {
             let time_string = if event.start_timestamp.time() == event.end_timestamp.time() {
                 "All Day".to_owned()
@@ -66,10 +67,14 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
                 Some(_) => " (Zoom)",
                 None => "",
             };
-            let label_string = format!(
-                "{}: <b>{}</b>{}",
-                time_string, &event.summary, meeturl_string
-            );
+            let label_string = if now > event.start_timestamp {
+                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
+            } else {
+                format!(
+                    "{}: <b>{}</b>{}",
+                    time_string, &event.summary, meeturl_string
+                )
+            };
             // We need to actually create a menu item with a dummy label, then get that child
             // element, cast it to an actual label and then modify its markup to make sure we get
             // menu items that are left aligned but expand to fill horizontal space
@@ -155,7 +160,7 @@ fn main() -> std::io::Result<()> {
     // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
     // (it requires static for the status_sender and I can't make that work yet)
     thread::spawn(move || loop {
-        match get_ical(&ical_url).and_then(|t| meeters_ical::parse_events(&t)) {
+        match get_ical(&ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
             Ok(events) => {
                 println!("Successfully got {:?} events", events.len());
                 // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
