@@ -197,7 +197,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
     let rrule_props = event
         .properties
         .iter()
-        .filter(|p| p.name == "DTSTART" || p.name == "RRULE") // || p.name == "DTEND"
+        .filter(|p| p.name == "DTSTART" || p.name == "RRULE" || p.name == "EXDATE") // || p.name == "DTEND"
         .map(|p| {
             if p.name == "DTSTART" {
                 Property {
