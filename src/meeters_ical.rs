@@ -68,8 +68,13 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
     let date_time_str = prop.value.as_ref().unwrap();
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
-        // TODO: timezone parsing at some point, for now just assume local
-        parse_ical_datetime(&date_time_str, &Berlin, &Berlin)
+        // We are assuming there is only one value in the TZID param
+        let tzid = &find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0];
+        match parse_tzid(tzid) {
+            Ok(timezone) => parse_ical_datetime(&date_time_str, &timezone, &Berlin),
+            // in case we can't parse the timezone ID we just default to local, also not optimal
+            Err(_) => parse_ical_datetime(&date_time_str, &Berlin, &Berlin),
+        }
     } else {
         // It is either
         //  - a datetime with no timezone: 20201102T235401
@@ -131,7 +136,7 @@ fn extract_start_end_time(
         let start_time = extract_ical_date(start_property)?;
         match end_property {
             Some(p) => extract_ical_date(p).map(|end_time| (start_time, end_time, true)),
-            None => Ok((start_time.clone(), start_time.clone(), true)),
+            None => Ok((start_time, start_time.clone(), true)),
         }
     } else {
         // not a whole day event, so real times, there should be an end time

@@ -39,10 +39,10 @@ fn read_windows_zones() -> HashMap<String, Tz> {
 fn read_fucked_windows_zones() -> HashMap<String, Tz> {
     let mut tzmap: HashMap<String, Tz> = HashMap::new();
     FUCKED_WINDOWS_ZONES.lines().for_each(|line| {
-        let first_split: Vec<&str> = line.split("=").collect();
+        let first_split: Vec<&str> = line.split('=').collect();
         let first = first_split[0];
         let iana = first_split[1];
-        let second_split: Vec<&str> = first.split(";").collect();
+        let second_split: Vec<&str> = first.split(';').collect();
         let fucked_windows = second_split[1];
         match iana.parse::<Tz>() {
             Ok(fucked_tz) => {

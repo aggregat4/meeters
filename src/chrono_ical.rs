@@ -1,13 +1,10 @@
-use chrono_tz::{Tz, UTC};
-use lazy_static::lazy_static;
-use regex::Regex;
+use chrono_tz::Tz;
 
 use crate::chrono_windows_timezones::*;
-use chrono::TimeZone;
 
 fn parse_windows_tzid(tzid: &str) -> Result<Tz, String> {
     match WINDOWS_TZ_TO_CHRONO_TZ.get(tzid) {
-        Some(tz) => Ok(tz.clone()),
+        Some(tz) => Ok(*tz),
         None => Err(format!(
             "Timezone string {} does not represent a windows timezone",
             tzid
@@ -19,7 +16,7 @@ fn parse_windows_tzid(tzid: &str) -> Result<Tz, String> {
 /// by identifying the UTC offset and generating a Tz from that
 fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
     match FUCKED_WINDOWS_TZ_TO_CHRONO_TZ.get(tzid) {
-        Some(tz) => Ok(tz.clone()),
+        Some(tz) => Ok(*tz),
         None => Err(format!(
             "Timezone string {} does not represent a windows timezone",
             tzid
@@ -51,7 +48,7 @@ fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
 /// * Explicit timezone strings containing a UTC offset and some cities, e.g. "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
 /// * Windows specific timezone identifiers like "W. Europe Standard Time", these are sourced from https://github.com/unicode-org/cldr/blob/master/common/supplemental/windowsZones.xml
 /// * IANA Timezone identifiers like "Europe/Berlin" (natively supported by chrono-tz)
-fn parse_tzid(tzid: &str) -> Result<Tz, String> {
+pub fn parse_tzid(tzid: &str) -> Result<Tz, String> {
     // TODO: this is a rediculous form, should be using or_else or something but couldn't get it to
     // work
     match tzid.parse() {

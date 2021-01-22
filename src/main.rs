@@ -11,9 +11,6 @@ use libappindicator::{AppIndicator, AppIndicatorStatus};
 use domain::CalendarError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[macro_use]
-extern crate maplit;
-
 mod chrono_ical;
 mod chrono_windows_timezones;
 mod domain;
@@ -172,6 +169,8 @@ fn main() -> std::io::Result<()> {
                 // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
                 let today_start = Local::now().date().and_hms(0, 0, 0);
                 let today_end = Local::now().date().and_hms(23, 59, 59);
+                // let today_start = Local::now().date().and_hms(0, 0, 0) - chrono::Duration::days(2);
+                // let today_end = Local::now().date().and_hms(23, 59, 59) - chrono::Duration::days(2);
                 let mut today_events = events
                     .into_iter()
                     .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
