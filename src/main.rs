@@ -11,6 +11,11 @@ use libappindicator::{AppIndicator, AppIndicatorStatus};
 use domain::CalendarError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[macro_use]
+extern crate maplit;
+
+mod chrono_ical;
+mod chrono_windows_timezones;
 mod domain;
 mod meeters_ical;
 

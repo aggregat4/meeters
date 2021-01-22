@@ -9,6 +9,7 @@ use regex::Regex;
 use rrule::RRuleSet;
 use std::collections::HashMap;
 
+use crate::chrono_ical::*;
 use crate::domain::*;
 
 fn find_property_value(properties: &[Property], name: &str) -> Option<String> {
@@ -204,7 +205,9 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                     name: p.name.clone(),
                     params: match &p.params {
                         None => None,
-                        // this is cleanup: rrule can not deal with explicit long TZID timezone identifiers and we just remove it here, this means that all the dates are in the wrong timezone though...
+                        // this is cleanup: rrule can not deal with explicit long TZID timezone
+                        // identifiers and we just remove it here, this means that all the dates
+                        // are in the wrong timezone though...
                         // TODO: deal with wrong timezones somehow (maybe just all set to local?)
                         // TODO: do manual TZ detection and map to the correct one instead of defaulting to Berlin
                         // first get the TZID parameter, map to real timezone then rewrite the date
