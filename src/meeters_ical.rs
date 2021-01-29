@@ -260,11 +260,17 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
     }
 }
 
-fn find_modifying_events(events: &[(IcalEvent, Event)]) -> HashMap<String, (IcalEvent, Event)> {
+/// Partitions the events into those that are modifying (i.e. they modify event instances of
+/// recurring events) and non modifying events which are the base events we need to process without
+/// all the modifying events.
+fn find_modifying_events(
+    events: &[(IcalEvent, Event)],
+) -> (HashMap<String, (IcalEvent, Event)>, Vec<(IcalEvent, Event)>) {
     // Create a map of all modifying events so we can correct recurring ocurrences later
     let mut modifying_events: HashMap<String, (IcalEvent, Event)> = HashMap::new();
+    let mut non_modifying_events = Vec::new();
     for (ical_event, event) in events {
-        // presense of a RECURRENCE-ID property is the trigger to know this is a modifying event
+        // presence of a RECURRENCE-ID property is the trigger to know this is a modifying event
         if let Some(recurrence_id_property) = find_property(&ical_event.properties, "RECURRENCE-ID")
         {
             match extract_ical_datetime(&recurrence_id_property) {
@@ -275,9 +281,11 @@ fn find_modifying_events(events: &[(IcalEvent, Event)]) -> HashMap<String, (Ical
                 }
                 Err(e) => println!("Can't parse a recurrence id as datetime: {:?}", e),
             }
+        } else {
+            non_modifying_events.push((ical_event.clone(), event.clone()));
         }
     }
-    modifying_events
+    (modifying_events, non_modifying_events)
 }
 
 fn parse_calendar(text: &str) -> Result<Option<IcalCalendar>, CalendarError> {
@@ -308,11 +316,11 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     match parse_calendar(text)? {
         Some(calendar) => {
             let event_tuples = parse_events(calendar)?;
-            // I need to clone this because apparently it otherwise complains about the event_tuples being moved and borrowed and I don't understand that
-            let cloned_events = event_tuples.clone();
-            let modifying_events = find_modifying_events(&cloned_events);
+            // we need to filter out the modifying events from the non modifying events as we would
+            // otherwise get duplicates
+            let (modifying_events, non_modifying_events) = find_modifying_events(&event_tuples);
             // Calculate occurrences for repeating events
-            event_tuples
+            non_modifying_events
                 .into_iter()
                 .map(
                     |(ical_event, parsed_event)| match parse_occurrences(&ical_event) {
@@ -345,6 +353,12 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                                             // println!("Original event occurrence timestamp: {}", datetime);
                                             if datetime == recurrence_datetime {
                                                 // println!("Replacing an event '{}' with a modifying event", parsed_event.summary);
+                                                if parsed_event.summary.contains("pdt") {
+                                                    println!(
+                                                        "PDT Event occurence being replace: {:?}",
+                                                        modifying_event
+                                                    );
+                                                }
                                                 return modifying_event.clone();
                                             }
                                         }
