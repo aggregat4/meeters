@@ -2,8 +2,10 @@ This program is mean to be a Linux graphical utility that lives in the tray (as 
 
 # TODO
 
-1. Fix the escaped commas, they appear to be prefixed with "\".
-1. Try to use `anyhow` and see if that makes error handling better.
+* Colorize the popup menu appointments by past/current/upcoming
+* Custom notifications 1 minute before a meeting with a clickable link (discard when? on click and after some time? Can I use actual notifications?)
+* Fix the escaped commas, they appear to be prefixed with "\".
+* Try to use `anyhow` and see if that makes error handling better.
 
 # Dealing With Changes to Recurring Events
 
