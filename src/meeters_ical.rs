@@ -349,16 +349,7 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                                             let recurrence_datetime =
                                                 extract_ical_datetime(recurrence_id_property)
                                                     .unwrap();
-                                            // println!("Modifying event timestamp: {}", recurrence_datetime);
-                                            // println!("Original event occurrence timestamp: {}", datetime);
                                             if datetime == recurrence_datetime {
-                                                // println!("Replacing an event '{}' with a modifying event", parsed_event.summary);
-                                                if parsed_event.summary.contains("pdt") {
-                                                    println!(
-                                                        "PDT Event occurence being replace: {:?}",
-                                                        modifying_event
-                                                    );
-                                                }
                                                 return modifying_event.clone();
                                             }
                                         }
