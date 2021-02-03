@@ -168,6 +168,8 @@ fn sanitise_string(input: &str) -> String {
         .replace("\\n", "\n")
         .replace("\\r", "\r")
         .replace("\\t", "\t")
+        .replace("\\,", ",")
+        .replace("\\'", "'")
 }
 
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1

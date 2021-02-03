@@ -3,11 +3,15 @@ use std::path::Path;
 use std::thread;
 
 use chrono::prelude::*;
+use chrono_tz::Tz;
 use directories::ProjectDirs;
 use gtk::prelude::*;
 use gtk::Menu;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
+use notify_rust::Notification;
 
+use crate::domain::Event;
+use crate::CalendarMessages::{EventNotification, TodayEvents};
 use domain::CalendarError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -35,6 +39,20 @@ fn create_indicator() -> AppIndicator {
     indicator.set_icon_theme_path(icon_path.to_str().unwrap());
     indicator.set_icon_full("meeters-appindicator", "icon");
     indicator
+}
+
+fn open_meeting(meet_url: &str) {
+    match gtk::show_uri(
+        None,
+        meet_url,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time must flow")
+            .as_secs() as u32,
+    ) {
+        Ok(_) => (),
+        Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
+    }
 }
 
 fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
@@ -89,17 +107,8 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             let new_event = (*event).clone();
             if new_event.meeturl.is_some() {
                 item.connect_activate(move |_clicked_item| {
-                    match gtk::show_uri(
-                        None,
-                        &new_event.meeturl.as_ref().unwrap(),
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time must flow")
-                            .as_secs() as u32,
-                    ) {
-                        Ok(_) => (),
-                        Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
-                    }
+                    let meet_url = &new_event.meeturl.as_ref().unwrap();
+                    open_meeting(meet_url);
                 });
             }
             m.append(&item);
@@ -129,6 +138,35 @@ fn load_config() -> std::io::Result<()> {
     Ok(())
 }
 
+fn get_events_for_interval(
+    events: Vec<Event>,
+    start_time: DateTime<Local>,
+    end_time: DateTime<Local>,
+) -> Vec<Event> {
+    let mut filtered_events = events
+        .into_iter()
+        .filter(|e| e.start_timestamp > start_time && e.start_timestamp < end_time)
+        .collect::<Vec<_>>();
+    filtered_events.sort_by(|a, b| Ord::cmp(&a.start_timestamp, &b.start_timestamp));
+    filtered_events
+}
+
+/// Time between two ical calendar download in milliseconds
+/// TODO: should be config
+const POLLING_INTERVAL_MS: u128 = 2 * 60 * 1000;
+
+/// The amount of time in seconds we want to be warned before the meeting starts
+/// TODO: should be config
+const EVENT_WARNING_TIME_SECONDS: i64 = 60;
+
+/// This is a prefix used to identify notification actions that are meant to open a meeting
+const MEETERS_NOTIFICATION_ACTION_OPEN_MEETING: &str = "meeters_open_meeting:";
+
+enum CalendarMessages {
+    TodayEvents(Vec<Event>),
+    EventNotification(Event),
+}
+
 fn main() -> std::io::Result<()> {
     load_config()?;
     let ical_url =
@@ -142,16 +180,54 @@ fn main() -> std::io::Result<()> {
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     // let (status_sender, status_receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
     let (events_sender, events_receiver) =
-        glib::MainContext::channel::<Result<Vec<domain::Event>, ()>>(glib::PRIORITY_DEFAULT);
+        glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::PRIORITY_DEFAULT);
     events_receiver.attach(None, move |event_result| {
         match event_result {
-            Ok(events) => {
+            Ok(TodayEvents(events)) => {
                 indicator.set_icon_full("meeters-appindicator", "icon");
                 // TODO: update the menu to reflect all the events or that we have no events
                 if events.is_empty() {
                     indicator.set_menu(&mut create_indicator_menu(&[]));
                 } else {
                     indicator.set_menu(&mut create_indicator_menu(&events));
+                }
+            }
+            Ok(EventNotification(event)) => {
+                println!("Event notification: {:?}", event);
+                let summary_str = &format!("Upcoming Event: {}", event.summary);
+                let mut notification = Notification::new();
+                notification
+                    .summary(summary_str)
+                    .body(
+                        &event
+                            .meeturl
+                            .clone()
+                            .or_else(|| Some("No Zoom Meeting".to_string()))
+                            .unwrap(),
+                    )
+                    // icons are standard freedesktop.org icon names, see https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
+                    .icon("appointment-new")
+                    // Critical urgency has to be manually dismissed (according to XDG spec), this seems like what we want?
+                    .urgency(notify_rust::Urgency::Critical);
+                // In case we have a meeting url we want to allow opening the meeting
+                if let Some(meeturl) = event.meeturl {
+                    notification
+                        .action(
+                            &format!("{}{}", MEETERS_NOTIFICATION_ACTION_OPEN_MEETING, meeturl),
+                            "Open Zoom Meeting",
+                        )
+                        .show()
+                        .unwrap()
+                        .wait_for_action(|action| {
+                            if action.starts_with(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING) {
+                                open_meeting(
+                                    &action[MEETERS_NOTIFICATION_ACTION_OPEN_MEETING.len()..],
+                                );
+                            }
+                        });
+                } else {
+                    // TODO: ignores error
+                    notification.show();
                 }
             }
             Err(_) => indicator.set_icon_full("meeters-appindicator-error", "icon"),
@@ -161,39 +237,68 @@ fn main() -> std::io::Result<()> {
     // start the background thread for calendar work
     // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
     // (it requires static for the status_sender and I can't make that work yet)
-    thread::spawn(move || loop {
-        match get_ical(&ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
-            Ok(events) => {
-                println!("Successfully got {:?} events", events.len());
-                // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
-                // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
-                let today_start = Local::now().date().and_hms(0, 0, 0);
-                let today_end = Local::now().date().and_hms(23, 59, 59);
-                // let today_start = Local::now().date().and_hms(0, 0, 0) - chrono::Duration::days(2);
-                // let today_end = Local::now().date().and_hms(23, 59, 59) - chrono::Duration::days(2);
-                let mut today_events = events
-                    .into_iter()
-                    .filter(|e| e.start_timestamp > today_start && e.start_timestamp < today_end)
-                    .collect::<Vec<_>>();
-                today_events.sort_by(|a, b| Ord::cmp(&a.start_timestamp, &b.start_timestamp));
-                println!(
-                    "There are {} events for today: {:?}",
-                    today_events.len(),
-                    today_events
-                );
-                events_sender
-                    .send(Ok(today_events))
-                    .expect("Channel should be sendable");
+    thread::spawn(move || {
+        let mut last_download_time = 0;
+        let mut last_events: Vec<Event> = vec![];
+        let mut last_notification_start_time: Option<DateTime<Tz>> = None;
+        loop {
+            let current_time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time must flow")
+                .as_millis();
+            if last_download_time == 0 || current_time - last_download_time > POLLING_INTERVAL_MS {
+                last_download_time = current_time;
+                match get_ical(&ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
+                    Ok(events) => {
+                        println!("Successfully got {:?} events", events.len());
+                        // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
+                        // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
+                        let today_start = Local::now().date().and_hms(0, 0, 0);
+                        let today_end = Local::now().date().and_hms(23, 59, 59);
+                        // let today_start = Local::now().date().and_hms(0, 0, 0) - chrono::Duration::days(2);
+                        // let today_end = Local::now().date().and_hms(23, 59, 59) - chrono::Duration::days(2);
+                        let today_events = get_events_for_interval(events, today_start, today_end);
+                        println!(
+                            "There are {} events for today: {:?}",
+                            today_events.len(),
+                            today_events
+                        );
+                        last_events = today_events.clone();
+                        events_sender
+                            .send(Ok(TodayEvents(today_events)))
+                            .expect("Channel should be sendable");
+                    }
+                    Err(e) => {
+                        // TODO: maybe implement logging to some standard dir location and return more of an error for a tooltip
+                        events_sender
+                            .send(Err(()))
+                            .expect("Channel should be sendable");
+                        println!("Error getting events: {:?}", e.msg);
+                    }
+                }
             }
-            Err(e) => {
-                // TODO: maybe implement logging to some standard dir location and return more of an error for a tooltip
-                events_sender
-                    .send(Err(()))
-                    .expect("Channel should be sendable");
-                println!("Error getting events: {:?}", e.msg);
+            // Phase two of the background loop: check whether we have events that are close to occurring and trigger a notification
+            // find the first event that is about to start in the next minute and if we did not notify before, send a notification
+            let now = Local::now();
+            let potential_next_immediate_upcoming_event = last_events.iter().find(|event| {
+                let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
+                time_distance_from_now.num_seconds() > 0
+                    && time_distance_from_now.num_seconds() <= EVENT_WARNING_TIME_SECONDS
+            });
+            if let Some(next_immediate_upcoming_event) = potential_next_immediate_upcoming_event {
+                if last_notification_start_time.is_none()
+                    || next_immediate_upcoming_event.start_timestamp
+                        != last_notification_start_time.unwrap()
+                {
+                    events_sender
+                        .send(Ok(EventNotification(next_immediate_upcoming_event.clone())))
+                        .expect("Channel should be sendable");
+                    last_notification_start_time =
+                        Some(next_immediate_upcoming_event.start_timestamp.clone());
+                }
             }
+            thread::sleep(std::time::Duration::from_secs(5));
         }
-        thread::sleep(std::time::Duration::from_secs(60 * 2));
     });
     // start listening for messages
     gtk::main();
