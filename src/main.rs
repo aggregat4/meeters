@@ -151,6 +151,47 @@ fn get_events_for_interval(
     filtered_events
 }
 
+fn show_event_notification(event: Event) {
+    println!("Event notification: {:?}", event);
+    let summary_str = &format!(
+        "{} - {}",
+        event.start_timestamp.format("%H:%M"),
+        event.summary
+    );
+    let mut notification = Notification::new();
+    notification
+        .summary(summary_str)
+        .body(
+            &event
+                .meeturl
+                .clone()
+                .or_else(|| Some("No Zoom Meeting".to_string()))
+                .unwrap(),
+        )
+        // icons are standard freedesktop.org icon names, see https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
+        .icon("appointment-new")
+        // Critical urgency has to be manually dismissed (according to XDG spec), this seems like what we want?
+        .urgency(notify_rust::Urgency::Critical);
+    // In case we have a meeting url we want to allow opening the meeting
+    if let Some(meeturl) = event.meeturl {
+        notification
+            .action(
+                &format!("{}{}", MEETERS_NOTIFICATION_ACTION_OPEN_MEETING, meeturl),
+                "Open Zoom Meeting",
+            )
+            .show()
+            .unwrap()
+            .wait_for_action(|action| {
+                if action.starts_with(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING) {
+                    open_meeting(&action[MEETERS_NOTIFICATION_ACTION_OPEN_MEETING.len()..]);
+                }
+            });
+    } else {
+        // TODO: ignores error
+        notification.show();
+    }
+}
+
 /// Time between two ical calendar download in milliseconds
 /// TODO: should be config
 const POLLING_INTERVAL_MS: u128 = 2 * 60 * 1000;
@@ -193,42 +234,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
             Ok(EventNotification(event)) => {
-                println!("Event notification: {:?}", event);
-                let summary_str = &format!("Upcoming Event: {}", event.summary);
-                let mut notification = Notification::new();
-                notification
-                    .summary(summary_str)
-                    .body(
-                        &event
-                            .meeturl
-                            .clone()
-                            .or_else(|| Some("No Zoom Meeting".to_string()))
-                            .unwrap(),
-                    )
-                    // icons are standard freedesktop.org icon names, see https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
-                    .icon("appointment-new")
-                    // Critical urgency has to be manually dismissed (according to XDG spec), this seems like what we want?
-                    .urgency(notify_rust::Urgency::Critical);
-                // In case we have a meeting url we want to allow opening the meeting
-                if let Some(meeturl) = event.meeturl {
-                    notification
-                        .action(
-                            &format!("{}{}", MEETERS_NOTIFICATION_ACTION_OPEN_MEETING, meeturl),
-                            "Open Zoom Meeting",
-                        )
-                        .show()
-                        .unwrap()
-                        .wait_for_action(|action| {
-                            if action.starts_with(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING) {
-                                open_meeting(
-                                    &action[MEETERS_NOTIFICATION_ACTION_OPEN_MEETING.len()..],
-                                );
-                            }
-                        });
-                } else {
-                    // TODO: ignores error
-                    notification.show();
-                }
+                show_event_notification(event);
             }
             Err(_) => indicator.set_icon_full("meeters-appindicator-error", "icon"),
         }
