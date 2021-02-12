@@ -128,7 +128,6 @@ fn load_config() -> std::io::Result<()> {
         .expect("Project directory must be available");
     let config_file = proj_dirs.config_dir().join("meeters_config.env");
     if !config_file.exists() {
-        //fs::create_dir_all(config_dir)?;
         panic!(
             "Require the project configuration file to be present at {}",
             config_file.to_str().unwrap()
@@ -193,13 +192,9 @@ fn show_event_notification(event: Event) {
 }
 
 /// Time between two ical calendar download in milliseconds
-/// TODO: should be config
-const POLLING_INTERVAL_MS: u128 = 2 * 60 * 1000;
-
+const DEFAULT_POLLING_INTERVAL_MS: u128 = 2 * 60 * 1000;
 /// The amount of time in seconds we want to be warned before the meeting starts
-/// TODO: should be config
-const EVENT_WARNING_TIME_SECONDS: i64 = 60;
-
+const DEFAULT_EVENT_WARNING_TIME_SECONDS: i64 = 60;
 /// This is a prefix used to identify notification actions that are meant to open a meeting
 const MEETERS_NOTIFICATION_ACTION_OPEN_MEETING: &str = "meeters_open_meeting:";
 
@@ -210,8 +205,23 @@ enum CalendarMessages {
 
 fn main() -> std::io::Result<()> {
     load_config()?;
-    let ical_url =
-        dotenv::var("ICAL_URL").expect("Expecting a configuration property with name ICAL_URL");
+    // Parse config
+    let config_ical_url = dotenv::var("MEETERS_ICAL_URL")
+        .expect("Expecting a configuration property with name MEETERS_ICAL_URL");
+    let config_show_event_notification: bool = match dotenv::var("MEETERS_EVENT_NOTIFICATION") {
+        Ok(val) => val.parse::<bool>().expect(
+            "Value for MEETERS_EVENT_NOTIFICATION configuration parameter must be a boolean",
+        ),
+        Err(_) => true,
+    };
+    let config_polling_interval_ms: u128 = match dotenv::var("MEETERS_POLLING_INTERVAL_MS") {
+        Ok(val) => val.parse::<u128>().expect("MEETERS_POLLING_INTERVAL_MS must be a positive integer expressing the polling interval in milliseconds"),
+        Err(_) => DEFAULT_POLLING_INTERVAL_MS
+    };
+    let config_event_warning_time_seconds: i64 = match dotenv::var("MEETERS_EVENT_WARNING_TIME_SECONDS") {
+        Ok(val) => val.parse::<i64>().expect("MEETERS_EVENT_WARNING_TIME_SECONDS must be a positive integer expressing the polling interval in seconds"),
+        Err(_) => DEFAULT_EVENT_WARNING_TIME_SECONDS
+    };
     // magic incantation for gtk
     gtk::init().unwrap();
     // set up our widgets
@@ -234,7 +244,9 @@ fn main() -> std::io::Result<()> {
                 }
             }
             Ok(EventNotification(event)) => {
-                show_event_notification(event);
+                if config_show_event_notification {
+                    show_event_notification(event);
+                }
             }
             Err(_) => indicator.set_icon_full("meeters-appindicator-error", "icon"),
         }
@@ -252,9 +264,11 @@ fn main() -> std::io::Result<()> {
                 .duration_since(UNIX_EPOCH)
                 .expect("Time must flow")
                 .as_millis();
-            if last_download_time == 0 || current_time - last_download_time > POLLING_INTERVAL_MS {
+            if last_download_time == 0
+                || current_time - last_download_time > config_polling_interval_ms
+            {
                 last_download_time = current_time;
-                match get_ical(&ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
+                match get_ical(&config_ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());
                         // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
@@ -289,7 +303,7 @@ fn main() -> std::io::Result<()> {
             let potential_next_immediate_upcoming_event = last_events.iter().find(|event| {
                 let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
                 time_distance_from_now.num_seconds() > 0
-                    && time_distance_from_now.num_seconds() <= EVENT_WARNING_TIME_SECONDS
+                    && time_distance_from_now.num_seconds() <= config_event_warning_time_seconds
             });
             if let Some(next_immediate_upcoming_event) = potential_next_immediate_upcoming_event {
                 if last_notification_start_time.is_none()
