@@ -127,7 +127,6 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
         // item.add(&label);
         m.append(&item);
     } else {
-        let now = Local::now();
         for event in events {
             let time_string = if event.start_timestamp.time() == event.end_timestamp.time() {
                 "All Day".to_owned()
@@ -143,6 +142,11 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
                 Some(_) => " (Zoom)",
                 None => "",
             };
+
+            // we used to format this text with markup and uset set_markup but that causes potential
+            // escaping issues and we just default to plain text now
+
+            // let now = Local::now();
             // let label_string = if now > event.start_timestamp {
             let label_string = format!("{}: {}{}", time_string, &event.summary, meeturl_string);
             // } else {
