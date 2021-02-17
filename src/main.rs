@@ -1,5 +1,6 @@
 use std::env;
 use std::path::Path;
+use std::path::PathBuf;
 use std::thread;
 
 use chrono::prelude::*;
@@ -30,15 +31,55 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
     Ok(response.into_string().unwrap())
 }
 
+fn has_icons(dir: &PathBuf) -> bool {
+    let normal_icon_path = dir.as_path().with_file_name("meeters-appindicator.png");
+    let error_icon_path = dir
+        .as_path()
+        .with_file_name("meeters-appindicator-error.png");
+    normal_icon_path.exists() && error_icon_path.exists()
+}
+
+fn find_icon_path() -> Option<PathBuf> {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if has_icons(&exe_path) {
+            return Some(exe_path);
+        }
+    }
+    let config_dir = get_config_directory();
+    if has_icons(&config_dir) {
+        return Some(config_dir);
+    }
+    None
+}
+
+fn set_error_icon(indicator: &mut AppIndicator) {
+    if find_icon_path().is_some() {
+        indicator.set_icon_full("meeters-appindicator-error", "icon");
+    }
+}
+
+fn set_success_icon(indicator: &mut libappindicator::AppIndicator) {
+    if find_icon_path().is_some() {
+        indicator.set_icon_full("meeters-appindicator", "icon");
+    }
+}
+
 fn create_indicator() -> AppIndicator {
     let mut indicator = AppIndicator::new("rs-meetings", "");
     indicator.set_status(AppIndicatorStatus::Active);
-    // including resources into a package is unsolved, except perhaps for something like https://doc.rust-lang.org/std/macro.include_bytes.html
-    // for our purposes this should probably be a resource in the configuration somewhere
-    let icon_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    indicator.set_icon_theme_path(icon_path.to_str().unwrap());
-    indicator.set_icon_full("meeters-appindicator", "icon");
-    indicator
+    match find_icon_path() {
+        Some(icon_path) => {
+            // including resources into a package is unsolved, except perhaps for something like https://doc.rust-lang.org/std/macro.include_bytes.html
+            // for our purposes this should probably be a resource in the configuration somewhere
+            indicator.set_icon_theme_path(icon_path.to_str().unwrap());
+            indicator.set_icon_full("meeters-appindicator", "icon");
+            indicator
+        }
+        None => {
+            indicator.set_icon_full("x-office-calendar", "icon");
+            indicator
+        }
+    }
 }
 
 fn open_meeting(meet_url: &str) {
@@ -87,14 +128,15 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
                 Some(_) => " (Zoom)",
                 None => "",
             };
-            let label_string = if now > event.start_timestamp {
-                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
-            } else {
-                format!(
-                    "{}: <b>{}</b>{}",
-                    time_string, &event.summary, meeturl_string
-                )
-            };
+            // let label_string = if now > event.start_timestamp {
+            let label_string = format!("{}: {}{}", time_string, &event.summary, meeturl_string);
+            // } else {
+            //     format!(
+            //         "{}: {}</b>{}",
+            //         time_string, &event.summary, meeturl_string
+            //     )
+            // };
+
             // We need to actually create a menu item with a dummy label, then get that child
             // element, cast it to an actual label and then modify its markup to make sure we get
             // menu items that are left aligned but expand to fill horizontal space
@@ -103,7 +145,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             // the end of the menu item
             let item = gtk::MenuItem::with_label("Test");
             let label = item.get_child().unwrap().downcast::<gtk::Label>().unwrap();
-            label.set_markup(&label_string);
+            label.set_text(&label_string);
             let new_event = (*event).clone();
             if new_event.meeturl.is_some() {
                 item.connect_activate(move |_clicked_item| {
@@ -123,10 +165,15 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     m
 }
 
+fn get_config_directory() -> PathBuf {
+    ProjectDirs::from("net", "aggregat4", "meeters")
+        .expect("Project directory must be available")
+        .config_dir()
+        .to_path_buf()
+}
+
 fn load_config() -> std::io::Result<()> {
-    let proj_dirs = ProjectDirs::from("net", "aggregat4", "meeters")
-        .expect("Project directory must be available");
-    let config_file = proj_dirs.config_dir().join("meeters_config.env");
+    let config_file = get_config_directory().join("meeters_config.env");
     if !config_file.exists() {
         panic!(
             "Require the project configuration file to be present at {}",
@@ -235,7 +282,7 @@ fn main() -> std::io::Result<()> {
     events_receiver.attach(None, move |event_result| {
         match event_result {
             Ok(TodayEvents(events)) => {
-                indicator.set_icon_full("meeters-appindicator", "icon");
+                set_success_icon(&mut indicator);
                 // TODO: update the menu to reflect all the events or that we have no events
                 if events.is_empty() {
                     indicator.set_menu(&mut create_indicator_menu(&[]));
@@ -248,7 +295,7 @@ fn main() -> std::io::Result<()> {
                     show_event_notification(event);
                 }
             }
-            Err(_) => indicator.set_icon_full("meeters-appindicator-error", "icon"),
+            Err(_) => set_error_icon(&mut indicator),
         }
         glib::Continue(true)
     });

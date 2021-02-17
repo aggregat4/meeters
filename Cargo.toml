@@ -1,12 +1,13 @@
 [package]
 name = "meeters"
 description = "Small Linux app indicator that will show meeting notifications and allow one click conference joining"
-version = "1.0.1"
+version = "1.1.0"
 authors = ["Boris Terzic <boris@terzic.be>"]
 edition = "2018"
 repository = "https://github.com/aggregat4/meeters/"
 homepage = "https://github.com/aggregat4/meeters/"
 license = "Apache-2.0"
+include = ["assets/*"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
