@@ -53,14 +53,24 @@ fn find_icon_path() -> Option<PathBuf> {
 }
 
 fn set_error_icon(indicator: &mut AppIndicator) {
-    if find_icon_path().is_some() {
-        indicator.set_icon_full("meeters-appindicator-error", "icon");
+    if let Some(icon_path) = find_icon_path() {
+        indicator.set_icon(
+            icon_path
+                .with_file_name("meeters-appindicator-error.png")
+                .to_str()
+                .unwrap(),
+        );
     }
 }
 
 fn set_success_icon(indicator: &mut libappindicator::AppIndicator) {
-    if find_icon_path().is_some() {
-        indicator.set_icon_full("meeters-appindicator", "icon");
+    if let Some(icon_path) = find_icon_path() {
+        indicator.set_icon(
+            icon_path
+                .with_file_name("meeters-appindicator.png")
+                .to_str()
+                .unwrap(),
+        );
     }
 }
 
@@ -69,10 +79,15 @@ fn create_indicator() -> AppIndicator {
     indicator.set_status(AppIndicatorStatus::Active);
     match find_icon_path() {
         Some(icon_path) => {
+            println!("ICON THEME PATH FOUND {}", icon_path.to_str().unwrap());
             // including resources into a package is unsolved, except perhaps for something like https://doc.rust-lang.org/std/macro.include_bytes.html
             // for our purposes this should probably be a resource in the configuration somewhere
-            indicator.set_icon_theme_path(icon_path.to_str().unwrap());
-            indicator.set_icon_full("meeters-appindicator", "icon");
+            indicator.set_icon(
+                icon_path
+                    .with_file_name("meeters-appindicator.png")
+                    .to_str()
+                    .unwrap(),
+            );
             indicator
         }
         None => {
