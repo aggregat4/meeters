@@ -1,8 +1,10 @@
 [package]
 name = "meeters"
-version = "0.1.0"
+version = "1.0.1"
 authors = ["Boris Terzic <boris@terzic.be>"]
 edition = "2018"
+repository = "https://github.com/aggregat4/meeters/"
+license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
