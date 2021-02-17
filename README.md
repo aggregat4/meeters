@@ -1,10 +1,35 @@
 This program is mean to be a Linux graphical utility that lives in the tray (as an app indicator), watches a configured ical calendar file and will notify shortly before a meeting begins with the added (and crucial) feature of extracting any online meeting URLs from the invitation and allowing one click access.
 
+# Building
+
+# Installation
+
+You can drop the meeters binary anywhere.
+
+# Configuration
+
+meeters can be configured using environment variables, or a configuration file or a mix of both.
+
+When using a file meeters expects a configuration file called `meeters_config.env` in a directory called `meeters` in your Linux standard config location. This will typically be: `~/.config/meeters/meeters_config.env`
+
+The file should have name/value pairs separated by equals signs. For example:
+
+```
+MEETERS_ICAL_URL=http://example.com/calendar.ics
+```
+
+The following properties are supported:
+
+| Property | Required | Default Value | Description |
+|----------|----------|---------------|-------------|
+| MEETERS_ICAL_URL | yes | - | The HTTP URL to your ical calendar |
+| MEETERS_EVENT_NOTIFICATION | no | true | Whether or not an upcoming event should be announced with a sticky notification ("true" or "false") | 
+| MEETERS_POLLING_INTERVAL_MS | no | 120000 | The time in milliseconds between two fetches of the ical calendar. |
+| MEETERS_EVENT_WARNING_TIME_SECONDS | no | 60 | The time in seconds before the next meeting to show the notification. |
+
 # TODO
 
 * Colorize the popup menu appointments by past/current/upcoming
-* Custom notifications 1 minute before a meeting with a clickable link (discard when? on click and after some time? Can I use actual notifications?)
-* Fix the escaped commas, they appear to be prefixed with "\".
 * Try to use `anyhow` and see if that makes error handling better.
 
 # Dealing With Changes to Recurring Events
