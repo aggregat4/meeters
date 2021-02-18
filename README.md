@@ -1,10 +1,13 @@
-This program is mean to be a Linux graphical utility that lives in the tray (as an app indicator), watches a configured ical calendar file and will notify shortly before a meeting begins with the added (and crucial) feature of extracting any online meeting URLs from the invitation and allowing one click access.
+This is graphical (GTK) utility for Linux that lives in the tray as an app indicator, watches a configured ical calendar file URL and will notify shortly before a meeting begins. It allows you to directly open any (Zoom) embedded meeting URL with a single click from either the popup menu or the notification.
 
 # Building
 
+1. Clone repo
+1. `cargo b`
+
 # Installation
 
-You can drop the meeters binary anywhere.
+You can drop the meeters binary anywhere. The tarball includes 2 icons that will be used when they are located next to the meeters binary. If not the program will default to a "new appointment" icon.
 
 # Configuration
 
@@ -32,7 +35,9 @@ The following properties are supported:
 * Colorize the popup menu appointments by past/current/upcoming
 * Try to use `anyhow` and see if that makes error handling better.
 
-# Dealing With Changes to Recurring Events
+# Implementation Details
+
+## Dealing With Changes to Recurring Events
 
 Some background discussion: <https://icalevents.com/4437-correct-handling-of-uid-recurrence-id-sequence/>.
 
