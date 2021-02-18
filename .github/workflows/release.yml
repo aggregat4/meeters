@@ -20,11 +20,9 @@ jobs:
         run: sudo apt install libdbus-1-dev libgtk-3-dev libappindicator3-dev          
       - name: Build and Package Release
         run: |
-          cargo build --release --all-features
+          cargo build --release
           cp assets/* target/release/
           tar -zcf meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz -C target/release meeters meeters-appindicator.png meeters-appindicator-error.png
-          pwd
-          ls -al
       - name: Upload the artifacts
         uses: skx/github-action-publish-binaries@master
         env:
