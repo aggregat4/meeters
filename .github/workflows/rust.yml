@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: install libgtk-3-dev
+      run: sudo apt install libgtk-3-dev
     - name: Install libdbus-1-dev
       run: sudo apt install libdbus-1-dev
     - name: Build
