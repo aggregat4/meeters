@@ -9,6 +9,9 @@ jobs:
     name: Create release-artifacts
     runs-on: ubuntu-latest
     steps:
+      - name: Get the release version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
@@ -22,10 +25,9 @@ jobs:
           tar -zcf meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz -C target/release meeters meeters-appindicator.png meeters-appindicator-error.png
           pwd
           ls -al
-          ls -al target/release
       - name: Upload the artifacts
         uses: skx/github-action-publish-binaries@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: 'target/release/meeters-v*'
+          args: 'meeters-*'
