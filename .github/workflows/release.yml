@@ -11,6 +11,9 @@ jobs:
     name: Upload Release Asset
     runs-on: ubuntu-latest
     steps:
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
@@ -21,7 +24,7 @@ jobs:
         run: |
           cargo build --release --all-features
           cp assets/* target/release/
-          tar -zcf meeters-${{ github.ref }}-linux-x86.tar.gz -C target/release meeters meeters-appindicator.png meeters-appindicator-error.png
+          tar -zcf meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz -C target/release meeters meeters-appindicator.png meeters-appindicator-error.png
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -29,7 +32,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          release_name: Release ${{ steps.get_version.outputs.VERSION }}
           draft: false
           prerelease: false
       - name: Upload Release Asset
@@ -39,6 +42,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-          asset_path: ./meeters-${{ github.ref }}-linux-x86.tar.gz
-          asset_name: meeters-${{ github.ref }}-linux-x86.tar.gz
+          asset_path: ./meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz
+          asset_name: meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz
           asset_content_type: application/tar+gzip
