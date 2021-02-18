@@ -11,11 +11,12 @@ jobs:
     name: Upload Release Asset
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
       - uses: actions/checkout@v2
+      - name: Build and Package Release
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - name: Build and Package Release
       - run: |
           cargo build --release --all-features
           cp assets/* target/release/
