@@ -66,7 +66,7 @@ pub fn parse_tzid(tzid: &str) -> Result<Tz, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono_tz::Europe::{Berlin, Vienna};
+    use chrono_tz::Europe::{Berlin, Dublin, Vienna};
 
     #[test]
     fn parses_iana_strings() {
@@ -83,6 +83,10 @@ mod tests {
         assert_eq!(
             Vienna,
             parse_tzid("(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna").unwrap()
+        );
+        assert_eq!(
+            Dublin,
+            parse_tzid("(UTC+00:00) Dublin, Edinburgh, Lisbon, London").unwrap()
         );
     }
 }
