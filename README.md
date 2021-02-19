@@ -26,6 +26,7 @@ The following properties are supported:
 | Property | Required | Default Value | Description |
 |----------|----------|---------------|-------------|
 | MEETERS_ICAL_URL | yes | - | The HTTP URL to your ical calendar |
+| MEETERS_LOCAL_TIMEZONE | no | Europe/Berlin | The local timezone where all times will be converted to. Make sure you set this to a valid IANA timezone identifier if you are not in the default timezone |
 | MEETERS_EVENT_NOTIFICATION | no | true | Whether or not an upcoming event should be announced with a sticky notification ("true" or "false") | 
 | MEETERS_POLLING_INTERVAL_MS | no | 120000 | The time in milliseconds between two fetches of the ical calendar. |
 | MEETERS_EVENT_WARNING_TIME_SECONDS | no | 60 | The time in seconds before the next meeting to show the notification. |

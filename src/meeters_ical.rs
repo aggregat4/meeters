@@ -1,6 +1,5 @@
 use chrono::prelude::*;
 use chrono::Duration;
-use chrono_tz::Europe::Berlin;
 use chrono_tz::{Tz, UTC};
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
@@ -11,6 +10,19 @@ use std::collections::HashMap;
 
 use crate::chrono_ical::*;
 use crate::domain::*;
+
+fn default_tz(_: dotenv::Error) -> Result<String, dotenv::Error> {
+    Ok("Europe/Berlin".to_string())
+}
+
+lazy_static! {
+    static ref LOCAL_TZ_IANA: String = dotenv::var("MEETERS_LOCAL_TIMEZONE")
+        .or_else(default_tz)
+        .unwrap();
+    static ref LOCAL_TZ: Tz = LOCAL_TZ_IANA
+        .parse()
+        .expect("Expecting to be able to parse the local timezone, instead got an error");
+}
 
 fn find_property_value(properties: &[Property], name: &str) -> Option<String> {
     for property in properties {
@@ -71,19 +83,19 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
         // We are assuming there is only one value in the TZID param
         let tzid = &find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0];
         match parse_tzid(tzid) {
-            Ok(timezone) => parse_ical_datetime(&date_time_str, &timezone, &Berlin),
+            Ok(timezone) => parse_ical_datetime(&date_time_str, &timezone, &LOCAL_TZ),
             // in case we can't parse the timezone ID we just default to local, also not optimal
-            Err(_) => parse_ical_datetime(&date_time_str, &Berlin, &Berlin),
+            Err(_) => parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ),
         }
     } else {
         // It is either
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
-            parse_ical_datetime(&date_time_str, &UTC, &Berlin)
+            parse_ical_datetime(&date_time_str, &UTC, &LOCAL_TZ)
         } else {
             // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
-            parse_ical_datetime(&date_time_str, &Berlin, &Berlin)
+            parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ)
         }
     }
 }
@@ -107,7 +119,7 @@ fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarErr
 }
 
 fn extract_ical_date(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
-    parse_ical_date_notz(&prop.value.as_ref().unwrap(), &Berlin)
+    parse_ical_date_notz(&prop.value.as_ref().unwrap(), &LOCAL_TZ)
 }
 
 fn extract_start_end_time(
@@ -202,12 +214,13 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
 fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     // We need to compensate for some weaknesses in the rrule library
     // by sanitising some date constructs and filtering out spurious ical fields.
+    let mut filtered_tzid: Option<String> = None;
     let rrule_props = event
         .properties
         .iter()
         .filter(|p| p.name == "DTSTART" || p.name == "RRULE" || p.name == "EXDATE") // || p.name == "DTEND"
         .map(|p| {
-            if p.name == "DTSTART" {
+            if p.name == "DTSTART" || p.name == "EXDATE" {
                 Property {
                     name: p.name.clone(),
                     params: match &p.params {
@@ -223,7 +236,14 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                         Some(params) => Some(
                             params
                                 .iter()
-                                .filter(|param| param.0 != "TZID")
+                                .filter(|param| {
+                                    if param.0 != "TZID" {
+                                        true
+                                    } else {
+                                        filtered_tzid = Some(param.1[0].clone());
+                                        false
+                                    }
+                                })
                                 .cloned()
                                 .collect(),
                         ),
@@ -236,6 +256,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
         })
         .collect::<Vec<Property>>();
     let event_as_string = properties_to_string(&rrule_props);
+    println!("Parsing event {:?}", event);
     match event_as_string.parse::<RRuleSet>() {
         Ok(mut ruleset) => Ok(ruleset
             .all()
@@ -245,7 +266,15 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 // all these dates are UTC and we hard convert them to the local timezone
                 // just so we can work with this. This needs to be fixed of course.
                 // Also converting by going to string and back since I can't deal with chrono correctly apparently
-                Berlin
+                let real_timezone: Tz = if let Some(original_tzid) = filtered_tzid.clone() {
+                    match parse_tzid(&original_tzid) {
+                        Ok(tz) => tz,
+                        Err(_) => *LOCAL_TZ,
+                    }
+                } else {
+                    *LOCAL_TZ
+                };
+                real_timezone
                     .from_local_datetime(
                         &NaiveDateTime::parse_from_str(
                             &*format!("{}", dt.format("%Y%m%dT%H%M%S")),
@@ -315,6 +344,8 @@ fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, Calen
 }
 
 pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
+    let tz: String = LOCAL_TZ_IANA.clone();
+    println!("Local Timezone determined to be {}", tz);
     match parse_calendar(text)? {
         Some(calendar) => {
             let event_tuples = parse_events(calendar)?;
