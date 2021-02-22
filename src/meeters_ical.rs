@@ -62,11 +62,15 @@ fn parse_ical_datetime(
     tz: &Tz,
     target_tz: &Tz,
 ) -> Result<DateTime<Tz>, CalendarError> {
-    // TODO: implementation
-    // this is where I left off: Plan: we get the timezone here that was determined by either having
-    // a Z modifier indicating zulu time, or no timezone indicating local time or it has an explicit timzone indicator and then we can just use it
     match NaiveDateTime::parse_from_str(&datetime, "%Y%m%dT%H%M%S") {
-        Ok(d) => Ok(tz.from_local_datetime(&d).unwrap().with_timezone(target_tz)),
+        Ok(d) => {
+            let converted = tz.from_local_datetime(&d).unwrap().with_timezone(target_tz);
+            // println!(
+            //     "Converting timezones between {} and {}, which means {} to {}",
+            //     tz, target_tz, datetime, converted
+            // );
+            Ok(converted)
+        }
         Err(_) => Err(CalendarError {
             msg: "Can't parse datetime string with tzid".to_string(),
         }),
@@ -82,19 +86,24 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // We are assuming there is only one value in the TZID param
         let tzid = &find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0];
+        // println!("We have a TZID: {}", tzid);
         match parse_tzid(tzid) {
             Ok(timezone) => parse_ical_datetime(&date_time_str, &timezone, &LOCAL_TZ),
             // in case we can't parse the timezone ID we just default to local, also not optimal
-            Err(_) => parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ),
+            Err(_) => {
+                // println!("We have an error parsing the source tzid");
+                parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ)
+            }
         }
     } else {
         // It is either
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
+            // println!("We assume UTC because of Z");
             parse_ical_datetime(&date_time_str, &UTC, &LOCAL_TZ)
         } else {
-            // TODO: I can't find a better way to get the local timezone offset, maybe just keep this value in a static?
+            // println!("We use the local timezone as the originating timezone");
             parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ)
         }
     }
@@ -138,6 +147,7 @@ fn extract_start_end_time(
     if start_property.params.is_some()
         && find_param(start_property.params.as_ref().unwrap(), "VALUE").is_some()
     {
+        // println!("Have a basic date without timezone datetime");
         // the first real value of the VALUE param should be "DATE"
         let value_param = &find_param(start_property.params.as_ref().unwrap(), "VALUE").unwrap()[0];
         if value_param != "DATE" {
@@ -151,6 +161,7 @@ fn extract_start_end_time(
             None => Ok((start_time, start_time.clone(), true)),
         }
     } else {
+        // println!("Have a 'real' datetime");
         // not a whole day event, so real times, there should be an end time
         match end_property {
             Some(p) => {
@@ -196,6 +207,7 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
     let location = sanitise_string(
         &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_else(|| "".to_string()),
     );
+    // println!("Parsing event '{}'", summary);
     let (start_timestamp, end_timestamp, all_day) = extract_start_end_time(&ical_event)?; // ? short circuits the error
     let meeturl = parse_zoom_url(&location)
         .or_else(|| parse_zoom_url(&summary))
@@ -256,7 +268,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
         })
         .collect::<Vec<Property>>();
     let event_as_string = properties_to_string(&rrule_props);
-    println!("Parsing event {:?}", event);
+    // println!("Parsing event {:?}", event);
     match event_as_string.parse::<RRuleSet>() {
         Ok(mut ruleset) => Ok(ruleset
             .all()
@@ -274,6 +286,9 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 } else {
                     *LOCAL_TZ
                 };
+                // need to do this silly conversion as otherwise the with_timezone call below doesn't work correctly
+                let local_tz = *LOCAL_TZ;
+                // println!("Real timezone for event {:?} is {}", event, real_timezone);
                 real_timezone
                     .from_local_datetime(
                         &NaiveDateTime::parse_from_str(
@@ -283,6 +298,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                         .unwrap(),
                     )
                     .unwrap()
+                    .with_timezone(&local_tz)
             })
             .collect()),
         Err(e) => Err(CalendarError {
@@ -345,7 +361,7 @@ fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, Calen
 
 pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     let tz: String = LOCAL_TZ_IANA.clone();
-    println!("Local Timezone determined to be {}", tz);
+    println!("Local Timezone configured as {}", tz);
     match parse_calendar(text)? {
         Some(calendar) => {
             let event_tuples = parse_events(calendar)?;
@@ -379,6 +395,10 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                                                 "RECURRENCE-ID",
                                             )
                                             .unwrap();
+                                            // println!(
+                                            //     "Calculating start and end for recurrence event {}",
+                                            //     parsed_event.summary
+                                            // );
                                             let recurrence_datetime =
                                                 extract_ical_datetime(recurrence_id_property)
                                                     .unwrap();

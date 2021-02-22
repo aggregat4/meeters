@@ -77,7 +77,7 @@ fn create_indicator() -> AppIndicator {
     indicator.set_status(AppIndicatorStatus::Active);
     match find_icon_path() {
         Some(icon_path) => {
-            println!("ICON THEME PATH FOUND {}", icon_path.to_str().unwrap());
+            // println!("ICON THEME PATH FOUND {}", icon_path.to_str().unwrap());
             // including resources into a package is unsolved, except perhaps for something like https://doc.rust-lang.org/std/macro.include_bytes.html
             // for our purposes this should probably be a resource in the configuration somewhere
             indicator.set_icon(
@@ -215,7 +215,7 @@ fn get_events_for_interval(
 }
 
 fn show_event_notification(event: Event) {
-    println!("Event notification: {:?}", event);
+    // println!("Event notification: {:?}", event);
     let summary_str = &format!(
         "{} - {}",
         event.start_timestamp.format("%H:%M"),
