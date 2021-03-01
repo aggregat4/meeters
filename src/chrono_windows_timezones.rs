@@ -69,6 +69,7 @@ fn read_fucked_windows_zones() -> HashMap<String, Tz> {
 ///
 /// We are interested in the second value (of the form "(UTC+01:00) Amsterdam...") and its IANA
 /// mapping
+///
 const FUCKED_WINDOWS_ZONES: &str = "Dateline Standard Time;(UTC-12:00) International Date Line West=Etc/GMT+12
 UTC-11;(UTC-11:00) Coordinated Universal Time -11=Etc/GMT+12
 Samoa Standard Time;(UTC-11:00)Samoa=US/Samoa

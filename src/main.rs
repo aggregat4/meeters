@@ -14,8 +14,10 @@ use crate::CalendarMessages::{EventNotification, TodayEvents};
 use domain::CalendarError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod binary_search;
 mod chrono_ical;
 mod chrono_windows_timezones;
+mod custom_timezone;
 mod domain;
 mod meeters_ical;
 

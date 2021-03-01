@@ -240,8 +240,6 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                         // this is cleanup: rrule can not deal with explicit long TZID timezone
                         // identifiers and we just remove it here, this means that all the dates
                         // are in the wrong timezone though...
-                        // TODO: deal with wrong timezones somehow (maybe just all set to local?)
-                        // TODO: do manual TZ detection and map to the correct one instead of defaulting to Berlin
                         // first get the TZID parameter, map to real timezone then rewrite the date
                         // value to a local date in the correct timezone (for example if DTSTART
                         // is UTC, just read and convert to local TZ then write back that value here)
@@ -270,7 +268,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
     let event_as_string = properties_to_string(&rrule_props);
     // println!("Parsing event {:?}", event);
     match event_as_string.parse::<RRuleSet>() {
-        Ok(mut ruleset) => Ok(ruleset
+        Ok(ruleset) => Ok(ruleset
             .all()
             .iter()
             .map(|dt| {
@@ -289,14 +287,13 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 // need to do this silly conversion as otherwise the with_timezone call below doesn't work correctly
                 let local_tz = *LOCAL_TZ;
                 // println!("Real timezone for event {:?} is {}", event, real_timezone);
+                let original_datetime = &NaiveDateTime::parse_from_str(
+                    &*format!("{}", dt.format("%Y%m%dT%H%M%S")),
+                    "%Y%m%dT%H%M%S",
+                )
+                .unwrap();
                 real_timezone
-                    .from_local_datetime(
-                        &NaiveDateTime::parse_from_str(
-                            &*format!("{}", dt.format("%Y%m%dT%H%M%S")),
-                            "%Y%m%dT%H%M%S",
-                        )
-                        .unwrap(),
-                    )
+                    .from_local_datetime(original_datetime)
                     .unwrap()
                     .with_timezone(&local_tz)
             })
@@ -549,5 +546,10 @@ mod tests {
     #[test]
     fn rruleset_monthly_first_wednesday() {
         println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap().all());
+    }
+
+    #[test]
+    fn rrule_all_fails_with_panic() {
+        "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap().all();
     }
 }
