@@ -19,7 +19,7 @@ lazy_static! {
     static ref LOCAL_TZ_IANA: String = dotenv::var("MEETERS_LOCAL_TIMEZONE")
         .or_else(default_tz)
         .unwrap();
-    static ref LOCAL_TZ: Tz = LOCAL_TZ_IANA
+    pub static ref LOCAL_TZ: Tz = LOCAL_TZ_IANA
         .parse()
         .expect("Expecting to be able to parse the local timezone, instead got an error");
 }
@@ -114,9 +114,12 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.4>
 fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
-    // TODO: What time is assumed here by chrono and does that match the ical spec?
+    // println!("Parsing {}", date);
     match NaiveDate::parse_from_str(date, "%Y%m%d") {
-        Ok(d) => Ok(tz.from_local_datetime(&d.and_hms(0, 0, 0)).unwrap()),
+        // NOTE: we don't convert the datetime to the given timezone since we are talking about a
+        // date that represents a particular _day_, not a time. Therefore we need to make sure that
+        // we don't accidentally shift it into another day
+        Ok(d) => Ok(tz.ymd(d.year(), d.month(), d.day()).and_hms(0, 0, 0)),
         Err(chrono_err) => Err(CalendarError {
             msg: format!(
                 "Can't parse date '{:?}' with cause: {:?}",
@@ -226,6 +229,7 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
 fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     // We need to compensate for some weaknesses in the rrule library
     // by sanitising some date constructs and filtering out spurious ical fields.
+    let (parsed_start_time, parsed_end_time, all_day_event) = extract_start_end_time(event)?;
     let mut filtered_tzid: Option<String> = None;
     let rrule_props = event
         .properties
@@ -272,10 +276,10 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
             .all()
             .iter()
             .map(|dt| {
-                // rrule does not understand TZ strings and we strip those beforehand
-                // all these dates are UTC and we hard convert them to the local timezone
-                // just so we can work with this. This needs to be fixed of course.
-                // Also converting by going to string and back since I can't deal with chrono correctly apparently
+                // rrule does not understand TZ strings and we strip those beforehand and save the
+                // original timezone the dates were in. Here we set the date for those dates to the
+                // original timezone OR the local timezone if none was specified. Then we convert
+                // them to the local time zone.
                 let real_timezone: Tz = if let Some(original_tzid) = filtered_tzid.clone() {
                     match parse_tzid(&original_tzid) {
                         Ok(tz) => tz,
@@ -292,10 +296,20 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                     "%Y%m%dT%H%M%S",
                 )
                 .unwrap();
-                real_timezone
-                    .from_local_datetime(original_datetime)
-                    .unwrap()
-                    .with_timezone(&local_tz)
+                if all_day_event {
+                    local_tz
+                        .ymd(
+                            original_datetime.year(),
+                            original_datetime.month(),
+                            original_datetime.day(),
+                        )
+                        .and_hms(0, 0, 0)
+                } else {
+                    real_timezone
+                        .from_local_datetime(original_datetime)
+                        .unwrap()
+                        .with_timezone(&local_tz)
+                }
             })
             .collect()),
         Err(e) => Err(CalendarError {

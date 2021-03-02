@@ -205,12 +205,17 @@ fn load_config() -> std::io::Result<()> {
 
 fn get_events_for_interval(
     events: Vec<Event>,
-    start_time: DateTime<Local>,
-    end_time: DateTime<Local>,
+    start_time: DateTime<Tz>,
+    end_time: DateTime<Tz>,
 ) -> Vec<Event> {
     let mut filtered_events = events
         .into_iter()
-        .filter(|e| e.start_timestamp > start_time && e.start_timestamp < end_time)
+        .filter(|e| {
+            // We check for events that are inside the interval OR overlap with the interval in some way
+            (e.start_timestamp > start_time && e.start_timestamp < end_time)
+                || (e.start_timestamp < start_time && e.end_timestamp > start_time)
+                || (e.start_timestamp < end_time && e.end_timestamp > end_time)
+        })
         .collect::<Vec<_>>();
     filtered_events.sort_by(|a, b| Ord::cmp(&a.start_timestamp, &b.start_timestamp));
     filtered_events
@@ -339,8 +344,13 @@ fn main() -> std::io::Result<()> {
                         println!("Successfully got {:?} events", events.len());
                         // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
                         // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
-                        let today_start = Local::now().date().and_hms(0, 0, 0);
-                        let today_end = Local::now().date().and_hms(23, 59, 59);
+                        let local_date = Local::now().date();
+                        let today_start = meeters_ical::LOCAL_TZ
+                            .ymd(local_date.year(), local_date.month(), local_date.day())
+                            .and_hms(0, 0, 0);
+                        let today_end = meeters_ical::LOCAL_TZ
+                            .ymd(local_date.year(), local_date.month(), local_date.day())
+                            .and_hms(23, 59, 59);
                         // let today_start = Local::now().date().and_hms(0, 0, 0) - chrono::Duration::days(2);
                         // let today_end = Local::now().date().and_hms(23, 59, 59) - chrono::Duration::days(2);
                         let today_events = get_events_for_interval(events, today_start, today_end);
