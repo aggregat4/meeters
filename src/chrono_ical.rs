@@ -22,25 +22,6 @@ fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
             tzid
         )),
     }
-    // lazy_static! {
-    //     static ref EXPLICIT_TZ_ID_REGEX: regex::Regex =
-    //         Regex::new(r"\(UTC([\+-][0-9][0-9]):([0-9][0-9])\)").unwrap();
-    // }
-    // match EXPLICIT_TZ_ID_REGEX.captures(tzid) {
-    //     Some(captures) => {
-    //         let hours = captures.get(1).unwrap().as_str().parse::<i32>().unwrap();
-    //         let minutes = captures.get(2).unwrap().as_str().parse::<i32>().unwrap();
-    //         let one_hour_in_secs = 3600;
-    //         let one_minute_in_secs = 60;
-    //         Ok(FixedOffset::east(
-    //             hours * one_hour_in_secs + one_minute_in_secs * minutes,
-    //         ))
-    //     }
-    //     None => Err(format!(
-    //         "Can not find an explicit timezone string in {}",
-    //         tzid
-    //     )),
-    // }
 }
 
 /// Parses a TZID string as it may occur in an ical event and returns a chrono-tz timezone.

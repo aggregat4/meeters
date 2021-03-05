@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::chrono_ical::*;
 use crate::domain::*;
+use crate::ical_util::{find_param, find_property, find_property_value, properties_to_string};
 
 fn default_tz(_: dotenv::Error) -> Result<String, dotenv::Error> {
     Ok("Europe/Berlin".to_string())
@@ -22,36 +23,6 @@ lazy_static! {
     pub static ref LOCAL_TZ: Tz = LOCAL_TZ_IANA
         .parse()
         .expect("Expecting to be able to parse the local timezone, instead got an error");
-}
-
-fn find_property_value(properties: &[Property], name: &str) -> Option<String> {
-    for property in properties {
-        if property.name == name {
-            // obviously this clone works but I don't like it, as_ref() didn't seem to do it
-            // still do not understand the semantics I should be using here
-            return property.value.clone();
-        }
-    }
-    None
-}
-
-fn find_property<'a>(properties: &'a [Property], name: &str) -> Option<&'a Property> {
-    for property in properties {
-        if property.name == name {
-            return Some(property);
-        }
-    }
-    None
-}
-
-fn find_param<'a>(params: &'a [(String, Vec<String>)], name: &str) -> Option<&'a [String]> {
-    for param in params {
-        let (param_name, values) = param;
-        if param_name == name {
-            return Some(values);
-        }
-    }
-    None
 }
 
 /// Parses datetimes of the format 'YYYYMMDDTHHMMSS'
@@ -77,7 +48,10 @@ fn parse_ical_datetime(
     }
 }
 
-/// If a property is a timestamp it can have 3 forms
+/// If a property is a timestamp it can have 3 forms:
+/// - a timestamp with an explicit timezone identifier (e.g. 20201102T235401 + "Europe/Berlin")
+/// - a timestamp with no timezone specified (e.g. 20201102T235401)
+/// - a timestamp in zulu time (UTC) (e.g. 20201102T235401Z)
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
 fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
@@ -109,8 +83,8 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
     }
 }
 
-/// Parses an ical date with no timezone information into a chrono Local date, assuming that it is in the
-/// local timezone. (This is probably wrong)
+/// Parses an ical date of the form YYYYMMDD with no timezone information into a datetime
+/// with the provided timezone.
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.4>
 fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
@@ -134,12 +108,14 @@ fn extract_ical_date(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
     parse_ical_date_notz(&prop.value.as_ref().unwrap(), &LOCAL_TZ)
 }
 
+/// This encapsulates the logic for parsing DTSTART and DTEND ical properties.
+/// It will detect whether an event is an all day event or not and it will convert the datetime to
+/// the local timezone.
 fn extract_start_end_time(
     ical_event: &IcalEvent,
 ) -> Result<(DateTime<Tz>, DateTime<Tz>, bool), CalendarError> {
     // we assume that DTSTART is mandatory, the spec sort of says that but also mentions something called
     // a "METHOD", ignoring that
-    // TODO: do manual TZ detection and map to the correct one instead of defaulting to Berlin
     let start_property = find_property(&ical_event.properties, "DTSTART").unwrap();
     let end_property = find_property(&ical_event.properties, "DTEND");
     // The start property can be a "date":
@@ -226,27 +202,28 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
     })
 }
 
+/// This function will parse occurrences from an ical event by using the rrule library to expand
+/// the various rule definitions into concrete DateTimes representing recurring instances
 fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarError> {
+    // We need to know whether this was an all day event or not because its start and end time needs
+    // to be treated specially
+    let (_parsed_start_time, _parsed_end_time, all_day_event) = extract_start_end_time(event)?;
     // We need to compensate for some weaknesses in the rrule library
     // by sanitising some date constructs and filtering out spurious ical fields.
-    let (parsed_start_time, parsed_end_time, all_day_event) = extract_start_end_time(event)?;
     let mut filtered_tzid: Option<String> = None;
     let rrule_props = event
         .properties
         .iter()
-        .filter(|p| p.name == "DTSTART" || p.name == "RRULE" || p.name == "EXDATE") // || p.name == "DTEND"
+        .filter(|p| p.name == "DTSTART" || p.name == "RRULE" || p.name == "EXDATE")
         .map(|p| {
             if p.name == "DTSTART" || p.name == "EXDATE" {
                 Property {
                     name: p.name.clone(),
                     params: match &p.params {
                         None => None,
-                        // this is cleanup: rrule can not deal with explicit long TZID timezone
-                        // identifiers and we just remove it here, this means that all the dates
-                        // are in the wrong timezone though...
-                        // first get the TZID parameter, map to real timezone then rewrite the date
-                        // value to a local date in the correct timezone (for example if DTSTART
-                        // is UTC, just read and convert to local TZ then write back that value here)
+                        // This is cleanup: rrule can not deal with explicit TZID timezone
+                        // identifiers and we just remove them but we also save the original TZID.
+                        // We will correct these datetimes later.
                         Some(params) => Some(
                             params
                                 .iter()
@@ -276,8 +253,8 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
             .all()
             .iter()
             .map(|dt| {
-                // rrule does not understand TZ strings and we strip those beforehand and save the
-                // original timezone the dates were in. Here we set the date for those dates to the
+                // rrule does not understand TZ strings and we strip it beforehand and save the
+                // original timezone. Here we set the date for those dates to the
                 // original timezone OR the local timezone if none was specified. Then we convert
                 // them to the local time zone.
                 let real_timezone: Tz = if let Some(original_tzid) = filtered_tzid.clone() {
@@ -291,11 +268,13 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 // need to do this silly conversion as otherwise the with_timezone call below doesn't work correctly
                 let local_tz = *LOCAL_TZ;
                 // println!("Real timezone for event {:?} is {}", event, real_timezone);
-                let original_datetime = &NaiveDateTime::parse_from_str(
-                    &*format!("{}", dt.format("%Y%m%dT%H%M%S")),
-                    "%Y%m%dT%H%M%S",
-                )
-                .unwrap();
+                let original_datetime = &NaiveDateTime::new(
+                    NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()),
+                    NaiveTime::from_hms(dt.hour(), dt.minute(), dt.second()),
+                );
+                // For all day events we don't want to do a timezone conversion: it is the same all
+                // day event in all timezones. If we would correct, we could make it an event
+                // starting the day before for example.
                 if all_day_event {
                     local_tz
                         .ymd(
@@ -305,6 +284,8 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                         )
                         .and_hms(0, 0, 0)
                 } else {
+                    // If it is not an all day event we first apply the originally saved timezone
+                    // and then we convert to the local timezone.
                     real_timezone
                         .from_local_datetime(original_datetime)
                         .unwrap()
@@ -321,10 +302,10 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
 /// Partitions the events into those that are modifying (i.e. they modify event instances of
 /// recurring events) and non modifying events which are the base events we need to process without
 /// all the modifying events.
-fn find_modifying_events(
+fn partition_modifying_events(
     events: &[(IcalEvent, Event)],
 ) -> (HashMap<String, (IcalEvent, Event)>, Vec<(IcalEvent, Event)>) {
-    // Create a map of all modifying events so we can correct recurring ocurrences later
+    // Create a map of all modifying events so we can correct recurring occurrences later
     let mut modifying_events: HashMap<String, (IcalEvent, Event)> = HashMap::new();
     let mut non_modifying_events = Vec::new();
     for (ical_event, event) in events {
@@ -370,16 +351,64 @@ fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, Calen
         .collect::<Result<Vec<(IcalEvent, Event)>, CalendarError>>() // will fail on the first parse error and return an error
 }
 
+fn calculate_occurrences(
+    ical_event: &IcalEvent,
+    parsed_event: Event,
+    occurrences: Vec<DateTime<Tz>>,
+    modifying_events: &HashMap<String, (IcalEvent, Event)>,
+) -> Vec<Event> {
+    occurrences
+        .into_iter()
+        .map(|datetime| {
+            // We need to figure out whether the occurrence can be used as such or whether it was changed by a modifying event
+            // We assume that each ical_event that is a recurring event has a UID, otherwise the unwrap will fail here.
+            // Needs more error handling?
+            let occurrence_uid = find_property_value(&ical_event.properties, "UID").unwrap();
+            if modifying_events.contains_key(&occurrence_uid) {
+                let (modifying_ical_event, modifying_event) =
+                    modifying_events.get(&occurrence_uid).unwrap();
+                // since these modifying events are constructed before and are assumed to have an occurence-id we just unwrap here
+                let recurrence_id_property =
+                    find_property(&modifying_ical_event.properties, "RECURRENCE-ID").unwrap();
+                // println!(
+                //     "Calculating start and end for recurrence event {}",
+                //     parsed_event.summary
+                // );
+                let recurrence_datetime = extract_ical_datetime(recurrence_id_property).unwrap();
+                if datetime == recurrence_datetime {
+                    return modifying_event.clone();
+                }
+            }
+            // we need to calculate this occurrence's end time by adding the duration of the original event to this particular start time
+            let end_time = datetime
+                + Duration::seconds(
+                    parsed_event.end_timestamp.timestamp()
+                        - parsed_event.start_timestamp.timestamp(),
+                );
+            Event {
+                summary: parsed_event.summary.to_string(),
+                description: parsed_event.description.to_string(),
+                location: parsed_event.location.to_string(),
+                meeturl: parsed_event.meeturl.clone(),
+                all_day: parsed_event.all_day,
+                start_timestamp: datetime.clone(),
+                end_timestamp: end_time,
+            }
+        })
+        .collect()
+}
+
 pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     let tz: String = LOCAL_TZ_IANA.clone();
     println!("Local Timezone configured as {}", tz);
     match parse_calendar(text)? {
         Some(calendar) => {
             let event_tuples = parse_events(calendar)?;
-            // we need to filter out the modifying events from the non modifying events as we would
-            // otherwise get duplicates
-            let (modifying_events, non_modifying_events) = find_modifying_events(&event_tuples);
-            // Calculate occurrences for repeating events
+            // Events are either normal events (potentially recurring) or they are modifying events
+            // that defines exceptions to recurrences of other events. We need to split these types out
+            let (modifying_events, non_modifying_events) =
+                partition_modifying_events(&event_tuples);
+            // Calculate occurrences for recurring events
             non_modifying_events
                 .into_iter()
                 .map(
@@ -388,57 +417,18 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                             if occurrences.is_empty() {
                                 Ok(vec![parsed_event])
                             } else {
-                                Ok(occurrences
-                                    .into_iter()
-                                    .map(|datetime| {
-                                        // We need to figure out whether the occurrence can be used as such or whether it was changed by a modifying event
-                                        // We assume that each ical_event that is a recurring event has a UID, otherwise the unwrap will fail here.
-                                        // Needs more error handling?
-                                        let occurrence_uid =
-                                            find_property_value(&ical_event.properties, "UID")
-                                                .unwrap();
-                                        if modifying_events.contains_key(&occurrence_uid) {
-                                            let (modifying_ical_event, modifying_event) =
-                                                modifying_events.get(&occurrence_uid).unwrap();
-                                            // since these modifying events are constructed before and are assumed to have an occurence-id we just unwrap here
-                                            let recurrence_id_property = find_property(
-                                                &modifying_ical_event.properties,
-                                                "RECURRENCE-ID",
-                                            )
-                                            .unwrap();
-                                            // println!(
-                                            //     "Calculating start and end for recurrence event {}",
-                                            //     parsed_event.summary
-                                            // );
-                                            let recurrence_datetime =
-                                                extract_ical_datetime(recurrence_id_property)
-                                                    .unwrap();
-                                            if datetime == recurrence_datetime {
-                                                return modifying_event.clone();
-                                            }
-                                        }
-                                        // we need to calculate this occurrence's end time by adding the duration of the original event to this particular start time
-                                        let end_time = datetime
-                                            + Duration::seconds(
-                                                parsed_event.end_timestamp.timestamp()
-                                                    - parsed_event.start_timestamp.timestamp(),
-                                            );
-                                        Event {
-                                            summary: parsed_event.summary.to_string(),
-                                            description: parsed_event.description.to_string(),
-                                            location: parsed_event.location.to_string(),
-                                            meeturl: parsed_event.meeturl.clone(),
-                                            all_day: parsed_event.all_day,
-                                            start_timestamp: datetime,
-                                            end_timestamp: end_time,
-                                        }
-                                    })
-                                    .collect())
+                                Ok(calculate_occurrences(
+                                    &ical_event,
+                                    parsed_event,
+                                    occurrences,
+                                    &modifying_events,
+                                ))
                             }
                         }
                         Err(e) => Err(e),
                     },
                 )
+                // we now have replaced each event with a list of its occurrences
                 .collect::<Result<Vec<Vec<Event>>, CalendarError>>()
                 .map(|event_instances| {
                     event_instances.into_iter().flatten().collect() // flatmap that shit
@@ -448,101 +438,9 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     }
 }
 
-fn format_param_values(param_values: &[String]) -> String {
-    param_values
-        .iter()
-        .map(|param_val| {
-            if param_val.contains(' ') {
-                format!("\"{}\"", param_val)
-            } else {
-                param_val.to_string()
-            }
-        })
-        .collect::<Vec<String>>()
-        .join(",")
-}
-
-fn params_to_string(params: &[(String, Vec<String>)]) -> String {
-    if params.is_empty() {
-        "".to_string()
-    } else {
-        return format!(
-            ";{}",
-            params
-                .iter()
-                .map(|param| format!("{}={}", param.0, format_param_values(&param.1)))
-                .collect::<Vec<String>>()
-                .join(",")
-        );
-    }
-}
-
-fn prop_to_string(prop: &Property) -> String {
-    return format!(
-        "{}{}:{}",
-        prop.name,
-        params_to_string(&prop.params.as_ref().unwrap_or(&vec![])),
-        prop.value.as_ref().unwrap_or(&"".to_string())
-    );
-}
-
-fn properties_to_string(properties: &[Property]) -> String {
-    properties
-        .iter() // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
-        .map(|p| prop_to_string(&p))
-        .collect::<Vec<String>>()
-        .join("\n")
-}
-
-#[allow(dead_code)]
-fn ical_event_to_string(event: &IcalEvent) -> String {
-    properties_to_string(&event.properties)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ical::parser::Component;
-
-    #[test]
-    fn ical_to_string_empty_ical_event() {
-        assert_eq!("", ical_event_to_string(&IcalEvent::new()));
-    }
-
-    #[test]
-    fn ical_to_string_one_prop_with_value() {
-        let mut event = IcalEvent::new();
-        let mut prop = Property::new();
-        prop.name = "DESCRIPTION".to_string();
-        prop.value = Some("foobar".to_string());
-        event.add_property(prop);
-        assert_eq!("DESCRIPTION:foobar", ical_event_to_string(&event));
-    }
-
-    #[test]
-    fn ical_to_string_one_prop_with_no_value() {
-        let mut event = IcalEvent::new();
-        let mut prop = Property::new();
-        prop.name = "DESCRIPTION".to_string();
-        event.add_property(prop);
-        assert_eq!("DESCRIPTION:", ical_event_to_string(&event));
-    }
-
-    #[test]
-    fn ical_to_string_two_props() {
-        let mut event = IcalEvent::new();
-        let mut prop = Property::new();
-        prop.name = "FOO".to_string();
-        prop.value = Some("bar".to_string());
-        event.add_property(prop);
-
-        prop = Property::new();
-        prop.name = "baz".to_string();
-        prop.value = Some("qux".to_string());
-        event.add_property(prop);
-
-        assert_eq!("FOO:bar\nbaz:qux", ical_event_to_string(&event));
-    }
 
     // Fixed: https://github.com/fmeringdal/rust_rrule/issues/2
     #[test]

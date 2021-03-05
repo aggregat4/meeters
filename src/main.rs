@@ -19,6 +19,7 @@ mod chrono_ical;
 mod chrono_windows_timezones;
 mod custom_timezone;
 mod domain;
+mod ical_util;
 mod meeters_ical;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
