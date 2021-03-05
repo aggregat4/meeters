@@ -23,13 +23,17 @@ mod ical_util;
 mod meeters_ical;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
-    let response = ureq::get(url).call();
-    if let Some(error) = response.synthetic_error() {
-        return Err(CalendarError {
-            msg: format!("Error getting ical from url: {}", error),
-        });
+    match ureq::get(url).call() {
+        Ok(response) => match response.into_string() {
+            Ok(body) => Ok(body),
+            Err(e) => Err(CalendarError {
+                msg: format!("Error getting calendar response body as text: {}", e),
+            }),
+        },
+        Err(e) => Err(CalendarError {
+            msg: format!("Error getting ical from url: {}", e),
+        }),
     }
-    Ok(response.into_string().unwrap())
 }
 
 fn has_icons(dir: &PathBuf) -> bool {
