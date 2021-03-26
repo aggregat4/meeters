@@ -30,7 +30,7 @@ fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
 /// * Windows specific timezone identifiers like "W. Europe Standard Time", these are sourced from https://github.com/unicode-org/cldr/blob/master/common/supplemental/windowsZones.xml
 /// * IANA Timezone identifiers like "Europe/Berlin" (natively supported by chrono-tz)
 pub fn parse_tzid(tzid: &str) -> Result<Tz, String> {
-    // TODO: this is a rediculous form, should be using or_else or something but couldn't get it to
+    // TODO: this is a ridiculous form, should be using or_else or something but couldn't get it to
     // work
     match tzid.parse() {
         Ok(tz) => Ok(tz),

@@ -77,6 +77,12 @@ pub fn properties_to_string(properties: &[Property]) -> String {
         .join("\n")
 }
 
+pub fn is_ical_date(prop: &Property) -> bool {
+    prop.params.is_some()
+        && find_param(prop.params.as_ref().unwrap(), "VALUE").is_some()
+        && &find_param(prop.params.as_ref().unwrap(), "VALUE").unwrap()[0] == "DATE"
+}
+
 #[allow(dead_code)]
 pub fn ical_event_to_string(event: &IcalEvent) -> String {
     properties_to_string(&event.properties)

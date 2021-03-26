@@ -395,7 +395,7 @@ fn main() -> std::io::Result<()> {
                         .send(Ok(EventNotification(next_immediate_upcoming_event.clone())))
                         .expect("Channel should be sendable");
                     last_notification_start_time =
-                        Some(next_immediate_upcoming_event.start_timestamp.clone());
+                        Some(next_immediate_upcoming_event.start_timestamp);
                 }
             }
             thread::sleep(std::time::Duration::from_secs(5));
