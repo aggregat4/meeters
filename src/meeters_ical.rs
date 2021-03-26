@@ -526,13 +526,16 @@ mod tests {
         "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap().all();
     }
 
-    #[test]
-    fn rrule_generates_final_event_on_8_3_2021() {
-        let dates = "DTSTART;TZID=W. Europe Standard Time:20201214T093000\nRRULE:FREQ=WEEKLY;UNTIL=20210308T083000Z;INTERVAL=2;BYDAY=MO;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20201228T093000,20210125T093000,20210208T093000".parse::<RRuleSet>().unwrap().all();
-        // the following outputs 2021-02-22 09:30:00 UTC
-        println!("last date: {}", dates[dates.len() - 1]);
-        assert_eq!(8, dates[dates.len() - 1].day());
-        assert_eq!(3, dates[dates.len() - 1].month());
-        assert_eq!(2021, dates[dates.len() - 1].year());
-    }
+    // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
+    // but it wasn't really rrule's fault, it just can't deal with non-standard timezone identifiers
+    // I am now trying to handle that myself and "protecting" rrule from this case
+    // #[test]
+    // fn rrule_generates_final_event_on_8_3_2021() {
+    //     let dates = "DTSTART;TZID=W. Europe Standard Time:20201214T093000\nRRULE:FREQ=WEEKLY;UNTIL=20210308T083000Z;INTERVAL=2;BYDAY=MO;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20201228T093000,20210125T093000,20210208T093000".parse::<RRuleSet>().unwrap().all();
+    //     // the following outputs 2021-02-22 09:30:00 UTC
+    //     println!("last date: {}", dates[dates.len() - 1]);
+    //     assert_eq!(8, dates[dates.len() - 1].day());
+    //     assert_eq!(3, dates[dates.len() - 1].month());
+    //     assert_eq!(2021, dates[dates.len() - 1].year());
+    // }
 }
