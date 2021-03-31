@@ -133,7 +133,8 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
         m.append(&item);
     } else {
         for event in events {
-            let time_string = if event.start_timestamp.time() == event.end_timestamp.time() {
+            let all_day = event.start_timestamp.time() == event.end_timestamp.time();
+            let time_string = if all_day {
                 "All Day".to_owned()
             } else {
                 format!(
@@ -148,19 +149,6 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
                 None => "",
             };
 
-            // we used to format this text with markup and uset set_markup but that causes potential
-            // escaping issues and we just default to plain text now
-
-            // let now = Local::now();
-            // let label_string = if now > event.start_timestamp {
-            let label_string = format!("{}: {}{}", time_string, &event.summary, meeturl_string);
-            // } else {
-            //     format!(
-            //         "{}: {}</b>{}",
-            //         time_string, &event.summary, meeturl_string
-            //     )
-            // };
-
             // We need to actually create a menu item with a dummy label, then get that child
             // element, cast it to an actual label and then modify its markup to make sure we get
             // menu items that are left aligned but expand to fill horizontal space
@@ -169,6 +157,19 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             // the end of the menu item
             let item = gtk::MenuItem::with_label("Test");
             let label = item.get_child().unwrap().downcast::<gtk::Label>().unwrap();
+            // we used to format this text with markup and uset set_markup but that causes potential
+            // escaping issues and we just default to plain text now
+            let now = Local::now();
+            let label_string = if all_day {
+                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
+            } else if now < event.start_timestamp {
+                format!("⃝ {}: {}{}", time_string, &event.summary, meeturl_string)
+            } else if now >= event.start_timestamp && now <= event.end_timestamp {
+                format!("* {}: {}{}", time_string, &event.summary, meeturl_string)
+            } else {
+                format!("✓  {}: {}{}", time_string, &event.summary, meeturl_string)
+            };
+
             label.set_text(&label_string);
             let new_event = (*event).clone();
             if new_event.meeturl.is_some() {
@@ -300,6 +301,16 @@ fn main() -> std::io::Result<()> {
     };
     // magic incantation for gtk
     gtk::init().unwrap();
+    // I can't get styles to work in appindicators
+    // // Futzing with styles
+    // let style = "label { color: red; }";
+    // let provider = CssProvider::new();
+    // provider.load_from_data(style.as_ref()).unwrap();
+    // gtk::StyleContext::add_provider_for_screen(
+    //     &gdk::Screen::get_default().expect("Error initializing gtk css provider."),
+    //     &provider,
+    //     gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    // );
     // set up our widgets
     let mut indicator = create_indicator();
     let mut menu = create_indicator_menu(&[]);
