@@ -6,13 +6,14 @@ use ical::property::Property;
 use lazy_static::lazy_static;
 use regex::Regex;
 use rrule::RRuleSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::chrono_ical::*;
 use crate::domain::*;
 use crate::ical_util::{
     find_param, find_property, find_property_value, is_ical_date, properties_to_string,
 };
+use multimap::MultiMap;
 
 fn default_tz(_: dotenv::Error) -> Result<String, dotenv::Error> {
     Ok("Europe/Berlin".to_string())
@@ -365,26 +366,47 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
 /// all the modifying events.
 fn partition_modifying_events(
     events: &[(IcalEvent, Event)],
-) -> (HashMap<String, (IcalEvent, Event)>, Vec<(IcalEvent, Event)>) {
+) -> (
+    MultiMap<String, (IcalEvent, Event)>,
+    Vec<(IcalEvent, Event)>,
+) {
     // Create a map of all modifying events so we can correct recurring occurrences later
-    let mut modifying_events: HashMap<String, (IcalEvent, Event)> = HashMap::new();
-    let mut non_modifying_events = Vec::new();
+    let mut modifying_events: MultiMap<String, (IcalEvent, Event)> = MultiMap::new();
+    let mut non_modifying_events: Vec<(IcalEvent, Event)> = Vec::new();
+    let mut non_modifying_event_uids = HashSet::new();
+    // find_property_value(&ical_event.properties, "UID").unwrap();
     for (ical_event, event) in events {
         // presence of a RECURRENCE-ID property is the trigger to know this is a modifying event
         if let Some(recurrence_id_property) = find_property(&ical_event.properties, "RECURRENCE-ID")
         {
             match extract_ical_datetime(&recurrence_id_property) {
                 Ok(_) => {
-                    find_property_value(&ical_event.properties, "UID").and_then(|uid| {
-                        modifying_events.insert(uid, (ical_event.clone(), event.clone()))
-                    });
+                    if let Some(uid) = find_property_value(&ical_event.properties, "UID") {
+                        println!("+MODIFYING EVENT: {:?}", ical_event);
+                        modifying_events.insert(uid, (ical_event.clone(), event.clone()));
+                    }
                 }
                 Err(e) => println!("Can't parse a recurrence id as datetime: {:?}", e),
             }
         } else {
+            println!("NON-MODIFYING EVENT: {:?}", ical_event);
+            let uid = find_property_value(&ical_event.properties, "UID").unwrap();
+            non_modifying_event_uids.insert(uid);
             non_modifying_events.push((ical_event.clone(), event.clone()));
         }
     }
+    // We make sure that we only retain modifying events that actually modify a non-modifying event
+    // if this is not the case then we assume that the modifying event is a full event on its own
+    // and add it back to the modifying events collection.
+    // This is something that can happen when someone gets forwarded a modified occurrence of an event
+    // and _just_ that modified occurrence.
+    for (modifying_uid, events) in &modifying_events {
+        if !non_modifying_event_uids.contains(modifying_uid) {
+            non_modifying_events.append(&mut events.clone())
+        }
+    }
+    modifying_events
+        .retain(|modifying_uid, _value| !non_modifying_event_uids.contains(modifying_uid));
     (modifying_events, non_modifying_events)
 }
 
@@ -416,7 +438,7 @@ fn calculate_occurrences(
     ical_event: &IcalEvent,
     parsed_event: &Event,
     occurrences: &[DateTime<Tz>],
-    modifying_events: &HashMap<String, (IcalEvent, Event)>,
+    modifying_events: &MultiMap<String, (IcalEvent, Event)>,
 ) -> Vec<Event> {
     occurrences
         .iter()
@@ -426,18 +448,22 @@ fn calculate_occurrences(
             // Needs more error handling?
             let occurrence_uid = find_property_value(&ical_event.properties, "UID").unwrap();
             if modifying_events.contains_key(&occurrence_uid) {
-                let (modifying_ical_event, modifying_event) =
-                    modifying_events.get(&occurrence_uid).unwrap();
-                // since these modifying events are constructed before and are assumed to have an occurence-id we just unwrap here
-                let recurrence_id_property =
-                    find_property(&modifying_ical_event.properties, "RECURRENCE-ID").unwrap();
-                // println!(
-                //     "Calculating start and end for recurrence event {}",
-                //     parsed_event.summary
-                // );
-                let recurrence_datetime = extract_ical_datetime(recurrence_id_property).unwrap();
-                if *datetime == recurrence_datetime {
-                    return modifying_event.clone();
+                for (modifying_ical_event, modifying_event) in
+                    modifying_events.get_vec(&occurrence_uid).unwrap()
+                {
+                    // since these modifying events are constructed before and are assumed to have a recurrence-id we just unwrap here
+                    let recurrence_id_property =
+                        find_property(&modifying_ical_event.properties, "RECURRENCE-ID").unwrap();
+                    // println!(
+                    //     "Calculating start and end for recurrence event {}",
+                    //     parsed_event.summary
+                    // );
+                    let recurrence_datetime =
+                        extract_ical_datetime(recurrence_id_property).unwrap();
+                    if *datetime == recurrence_datetime {
+                        // the modifying event has the same UID as our event and it has the same timestamp, so we return the modification instead
+                        return modifying_event.clone();
+                    }
                 }
             }
             // we need to calculate this occurrence's end time by adding the duration of the original event to this particular start time
@@ -475,6 +501,7 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                 .map(
                     |(ical_event, parsed_event)| match parse_occurrences(&ical_event) {
                         Ok(occurrences) => {
+                            println!("Occurrences for {:?}: {:?}", ical_event, occurrences);
                             if occurrences.is_empty() {
                                 Ok(vec![parsed_event])
                             } else {

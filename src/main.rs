@@ -358,8 +358,7 @@ fn main() -> std::io::Result<()> {
                 match get_ical(&config_ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());
-                        // let today_start = Local::now().date().and_hms(0, 0, 0) + chrono::Duration::days(2);
-                        // let today_end = Local::now().date().and_hms(23, 59, 59) + chrono::Duration::days(2);
+                        // let local_date = Local::now().date() - chrono::Duration::days(5);
                         let local_date = Local::now().date();
                         let today_start = meeters_ical::LOCAL_TZ
                             .ymd(local_date.year(), local_date.month(), local_date.day())
@@ -367,8 +366,6 @@ fn main() -> std::io::Result<()> {
                         let today_end = meeters_ical::LOCAL_TZ
                             .ymd(local_date.year(), local_date.month(), local_date.day())
                             .and_hms(23, 59, 59);
-                        // let today_start = Local::now().date().and_hms(0, 0, 0) - chrono::Duration::days(2);
-                        // let today_end = Local::now().date().and_hms(23, 59, 59) - chrono::Duration::days(2);
                         let today_events = get_events_for_interval(events, today_start, today_end);
                         println!(
                             "There are {} events for today: {:?}",
