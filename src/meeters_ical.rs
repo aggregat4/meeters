@@ -382,14 +382,14 @@ fn partition_modifying_events(
             match extract_ical_datetime(&recurrence_id_property) {
                 Ok(_) => {
                     if let Some(uid) = find_property_value(&ical_event.properties, "UID") {
-                        println!("+MODIFYING EVENT: {:?}", ical_event);
+                        // println!("+MODIFYING EVENT: {:?}", ical_event);
                         modifying_events.insert(uid, (ical_event.clone(), event.clone()));
                     }
                 }
                 Err(e) => println!("Can't parse a recurrence id as datetime: {:?}", e),
             }
         } else {
-            println!("NON-MODIFYING EVENT: {:?}", ical_event);
+            // println!("NON-MODIFYING EVENT: {:?}", ical_event);
             let uid = find_property_value(&ical_event.properties, "UID").unwrap();
             non_modifying_event_uids.insert(uid);
             non_modifying_events.push((ical_event.clone(), event.clone()));
@@ -406,7 +406,7 @@ fn partition_modifying_events(
         }
     }
     modifying_events
-        .retain(|modifying_uid, _value| !non_modifying_event_uids.contains(modifying_uid));
+        .retain(|modifying_uid, _value| non_modifying_event_uids.contains(modifying_uid));
     (modifying_events, non_modifying_events)
 }
 
@@ -448,9 +448,8 @@ fn calculate_occurrences(
             // Needs more error handling?
             let occurrence_uid = find_property_value(&ical_event.properties, "UID").unwrap();
             if modifying_events.contains_key(&occurrence_uid) {
-                for (modifying_ical_event, modifying_event) in
-                    modifying_events.get_vec(&occurrence_uid).unwrap()
-                {
+                let modifications = modifying_events.get_vec(&occurrence_uid).unwrap();
+                for (modifying_ical_event, modifying_event) in modifications {
                     // since these modifying events are constructed before and are assumed to have a recurrence-id we just unwrap here
                     let recurrence_id_property =
                         find_property(&modifying_ical_event.properties, "RECURRENCE-ID").unwrap();
@@ -501,7 +500,7 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                 .map(
                     |(ical_event, parsed_event)| match parse_occurrences(&ical_event) {
                         Ok(occurrences) => {
-                            println!("Occurrences for {:?}: {:?}", ical_event, occurrences);
+                            // println!("Occurrences for {:?}: {:?}", ical_event, occurrences);
                             if occurrences.is_empty() {
                                 Ok(vec![parsed_event])
                             } else {

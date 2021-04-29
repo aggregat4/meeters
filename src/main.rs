@@ -358,7 +358,7 @@ fn main() -> std::io::Result<()> {
                 match get_ical(&config_ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());
-                        // let local_date = Local::now().date() - chrono::Duration::days(5);
+                        // let local_date = Local::now().date() - chrono::Duration::days(6);
                         let local_date = Local::now().date();
                         let today_start = meeters_ical::LOCAL_TZ
                             .ymd(local_date.year(), local_date.month(), local_date.day())
