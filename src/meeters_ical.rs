@@ -6,7 +6,7 @@ use ical::property::Property;
 use lazy_static::lazy_static;
 use regex::Regex;
 use rrule::RRuleSet;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::chrono_ical::*;
 use crate::domain::*;
@@ -78,7 +78,7 @@ fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError>
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
             // println!("We assume UTC because of Z");
-            parse_ical_datetime(&date_time_str, &UTC, &LOCAL_TZ)
+            parse_ical_datetime(&date_time_str.strip_suffix("Z").unwrap(), &UTC, &LOCAL_TZ)
         } else {
             // println!("We use the local timezone as the originating timezone");
             parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ)
@@ -261,10 +261,7 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
     }
     // some preliminary data wrangling so the actual handling of all the cases is easier afterwards
     let dtstart_prop = maybe_dtstart_prop.unwrap();
-    let date_time_str = dtstart_prop.value.as_ref().unwrap();
-    let rrule_prop = maybe_rrule_prop.unwrap();
-    let maybe_exdate_prop = find_property(&event.properties, "EXDATE");
-    let all_day_event = is_ical_date(dtstart_prop);
+    let dtstart_time_str = dtstart_prop.value.as_ref().unwrap();
     let maybe_tzid_param = dtstart_prop
         .params
         .as_ref()
@@ -281,6 +278,9 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
     } else {
         None
     };
+    let rrule_prop = maybe_rrule_prop.unwrap();
+    let maybe_exdate_prop = find_property(&event.properties, "EXDATE");
+    let all_day_event = is_ical_date(dtstart_prop);
     // Prepare a vec of all relevant rrule properties for rrule to work on by stripping tzid parameters
     let mut rule_props = vec![];
     let (stripped_dtstart, _) = strip_param(dtstart_prop, "TZID");
@@ -290,12 +290,12 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
         stripped_exdate = strip_param(&exdate_prop, "TZID").0;
         rule_props.push(stripped_exdate);
     }
-    rule_props.push(rrule_prop.clone());
-    let event_as_string = properties_to_string(&rule_props);
     // need to do this silly conversion as otherwise the with_timezone call below doesn't work correctly
     let local_tz = *LOCAL_TZ;
     // Case 1: DTSTART is a DATE
     if all_day_event {
+        rule_props.push(rrule_prop.clone());
+        let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
                 .all()
@@ -310,14 +310,15 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                 msg: format!("error in RRULE parsing: {}", e),
             }),
         }
-    } else if maybe_tzid_param.is_none() && !date_time_str.ends_with('Z') {
+    } else if maybe_tzid_param.is_none() && !dtstart_time_str.ends_with('Z') {
         // CASE 2: we have local datetimes with no timezone information, throw error?
         Err(CalendarError {
             msg: "Found an event with a local timestamp without a timezone, this is unsupported"
                 .to_string(),
         })
-    } else if maybe_tzid_param.is_none() && date_time_str.ends_with('Z') {
+    } else if maybe_tzid_param.is_none() && dtstart_time_str.ends_with('Z') {
         // CASE 3: UTC datetime, let rrule do its thing, we convert all occurrences to the local TZ
+        rule_props.push(rrule_prop.clone());
         let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
@@ -332,9 +333,49 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
     } else if let Some(original_tz) = maybe_original_tz {
         // CASE 4: we have a timestamp with a timezone identifier
         // We strip the tz from the DTSTART and EXDATE and let rrule just regard them as naked timestamps
+        // We do need to manually convert the UNTIL parameter of the RRULE to the original TZ since that will always be UTC and if don't convert we can miss the last meeting of the interval
         // let rrule calculate occurrences
         // interpret all occurrences as original TZ, then convert to local TZ
+        //
+        // let maybe_summary_prop = find_property(&event.properties, "SUMMARY");
+        // println!("SUMMARY: {:?}", maybe_summary_prop.unwrap());
+        //
+        // hard assumption that there is a value always in an rrule
+        let rrule_value = rrule_prop.value.as_ref().unwrap();
+        // RRULE is a bit special, the parameters are not actually in the params but they are encoded in the VALUE of the property
+        // we basically parse the value here and substitute the UNTIL component with a date that has a converted timestamp
+        let rrule_value_modified = rrule_value
+            .split(";")
+            .map(|rrule_component| {
+                if let Some(until_value) = rrule_component.strip_prefix("UNTIL=") {
+                    if until_value.ends_with("Z") {
+                        // NOTE we do not check whether maybe the parse failed, we hard assume it does
+                        let until_originaltz = parse_ical_datetime(
+                            &until_value.to_string().strip_suffix("Z").unwrap(),
+                            &UTC,
+                            &original_tz,
+                        )
+                        .unwrap();
+                        let until_originaltz_str =
+                            until_originaltz.format("%Y%m%dT%H%M%S").to_string();
+                        format!("UNTIL={}", until_originaltz_str)
+                    } else {
+                        rrule_component.to_string()
+                    }
+                } else {
+                    rrule_component.to_string()
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(";");
+        let new_rule_prop = Property {
+            name: rrule_prop.name.clone(),
+            params: rrule_prop.params.clone(),
+            value: Some(rrule_value_modified),
+        };
+        rule_props.push(new_rule_prop.clone());
         let event_as_string = properties_to_string(&rule_props);
+        // println!("New RRULE string: {:?}", event_as_string);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
                 .all()
@@ -344,6 +385,14 @@ fn parse_occurrences(event: &IcalEvent) -> Result<Vec<DateTime<Tz>>, CalendarErr
                         NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()),
                         NaiveTime::from_hms(dt.hour(), dt.minute(), dt.second()),
                     );
+                    // println!(
+                    //     "converted occurence date from {:?} to {:?}",
+                    //     original_datetime,
+                    //     original_tz
+                    //         .from_local_datetime(&original_datetime)
+                    //         .unwrap()
+                    //         .with_timezone(&local_tz)
+                    // );
                     original_tz
                         .from_local_datetime(&original_datetime)
                         .unwrap()
@@ -550,6 +599,12 @@ mod tests {
     #[test]
     fn rrule_all_fails_with_panic() {
         "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap().all();
+    }
+
+    #[test]
+    fn rrule_all_missing_final_meeting() {
+        //println!("{:?}", "DTSTART;TZID=W. Europe Standard Time:20210316T113000\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20210406T113000,20210504T11300\n0UID:040000008200E00074C5B7101A82E0080000000000EB5C2C7B0FD701000000000000000\n 010000000E4ADD290686A07499DF2A0FAB11D79E9".parse::<RRuleSet>().unwrap().all());
+        println!("{:?}", "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO".parse::<RRuleSet>().unwrap().all());
     }
 
     // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
