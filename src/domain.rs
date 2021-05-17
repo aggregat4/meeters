@@ -15,7 +15,7 @@ pub struct CalendarError {
 
 impl fmt::Display for CalendarError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error getting events: {}", self.msg)
+        write!(f, "Calendar Error: {}", self.msg)
     }
 }
 
