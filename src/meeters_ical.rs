@@ -628,6 +628,7 @@ mod tests {
     PRODID:Microsoft Exchange Server 2010
     VERSION:2.0
     X-WR-CALNAME:Calendar
+
     BEGIN:VTIMEZONE
     TZID:W. Europe Standard Time
     BEGIN:STANDARD
@@ -643,6 +644,7 @@ mod tests {
     RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3
     END:DAYLIGHT
     END:VTIMEZONE
+
     BEGIN:VTIMEZONE
     TZID:(UTC) Coordinated Universal Time
     BEGIN:STANDARD

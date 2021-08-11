@@ -15,13 +15,39 @@ pub struct CustomTz {
 impl TimeSpans for CustomTz {
     fn timespans(&self) -> FixedTimespanSet {
         self.timespanset.clone()
+        // const REST: &'static [(i64, FixedTimespan)] = &[
+        //     (
+        //         -2717650800,
+        //         FixedTimespan {
+        //             utc_offset: -18000,
+        //             dst_offset: 0,
+        //             name: "EST",
+        //         },
+        //     ),
+        //     (
+        //         -1633280400,
+        //         FixedTimespan {
+        //             utc_offset: -18000,
+        //             dst_offset: 3600,
+        //             name: "EDT",
+        //         },
+        //     ),
+        //     (
+        //         -1615140000,
+        //         FixedTimespan {
+        //             utc_offset: -18000,
+        //             dst_offset: 0,
+        //             name: "EST",
+        //         },
+        //     ),
+        // ];
         // FixedTimespanSet {
         //     first: FixedTimespan {
         //         utc_offset: -17762,
         //         dst_offset: 0,
         //         name: "LMT",
         //     },
-        //     rest: vec!::<(i64, FixedTimespan)>[],
+        //     rest: REST,
         // }
     }
     // const REST: &'static [(i64, FixedTimespan)] = &[
@@ -398,5 +424,72 @@ impl TimeZone for CustomTz {
         let index =
             binary_search(0, timespans.len(), |i| timespans.utc_span(i).cmp(timestamp)).unwrap();
         TzOffset::new(self.clone(), timespans.get(index))
+    }
+}
+
+// pub struct CustomTz {
+//     name: String,
+//     timespanset: FixedTimespanSet,
+// }
+
+// #[derive(Clone)]
+// pub struct FixedTimespanSet {
+//     pub first: FixedTimespan,
+//     pub rest: &'static [(i64, FixedTimespan)],
+// }
+
+// pub struct FixedTimespan {
+//     /// The base offset from UTC; this usually doesn't change unless the government changes something
+//     pub utc_offset: i32,
+//     /// The additional offset from UTC for this timespan; typically for daylight saving time
+//     pub dst_offset: i32,
+//     /// The name of this timezone, for example the difference between `EDT`/`EST`
+//     pub name: &'static str,
+// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Timelike;
+
+    /// This tests whether we can create a custom timezone with two
+    /// spans that have different offsets.
+    /// If we create a UTC datetime in the second span we verify
+    /// that the offsets are applied correctly. We do the same for the first span.
+    #[test]
+    fn find_timespan_and_apply_offsets() {
+        let mytz: CustomTz = CustomTz {
+            name: "mytz".to_string(),
+            timespanset: FixedTimespanSet {
+                first: FixedTimespan {
+                    utc_offset: 3600,
+                    dst_offset: 0,
+                    name: "CET",
+                },
+                rest: &[(
+                    /*
+                     Sunday, August 1, 2021 10:00:00 AM GMT = 1627812000
+                    */
+                    1627812000,
+                    FixedTimespan {
+                        utc_offset: 3600,
+                        dst_offset: 3600,
+                        name: "CEST",
+                    },
+                )],
+            },
+        };
+        // This datetime should fall in the second span since it is after 10 am august 1st 2021
+        let localtime_second_span =
+            mytz.from_utc_datetime(&NaiveDate::from_ymd(2021, 8, 1).and_hms(10, 1, 0));
+        assert_eq!(12, localtime_second_span.hour());
+        assert_eq!(1, localtime_second_span.minute());
+        assert_eq!(0, localtime_second_span.second());
+        // This datetime should fall in the first span since it is before 10 am august 1st 2021
+        let localtime_first_span =
+            mytz.from_utc_datetime(&NaiveDate::from_ymd(2021, 8, 1).and_hms(9, 59, 0));
+        assert_eq!(10, localtime_first_span.hour());
+        assert_eq!(59, localtime_first_span.minute());
+        assert_eq!(0, localtime_first_span.second());
     }
 }
