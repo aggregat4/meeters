@@ -1,11 +1,14 @@
+use crate::custom_timezone::CustomTz;
 use chrono::prelude::*;
 use chrono::Duration;
 use chrono_tz::{Tz, UTC};
+use ical::parser::ical::component::IcalTimeZone;
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
 use lazy_static::lazy_static;
 use regex::Regex;
 use rrule::RRuleSet;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::chrono_ical::*;
@@ -473,6 +476,7 @@ fn parse_calendar(text: &str) -> Result<Option<IcalCalendar>, CalendarError> {
 }
 
 fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, CalendarError> {
+    // TODO: parse custom timezones so we can pass them onto parse_event
     calendar
         .events
         .into_iter()
@@ -574,6 +578,30 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     }
 }
 
+/// Parses the VTIMEZONEs from the calendar and returns a map from timezone id to CustomTz
+pub fn parse_ical_timezones(
+    calendar: IcalCalendar,
+) -> Result<HashMap<String, CustomTz>, CalendarError> {
+    calendar
+        .timezones
+        .into_iter()
+        .map(|vtimezone| parse_ical_timezone(&vtimezone))
+        .collect()
+}
+
+fn parse_ical_timezone(vtimezone: &IcalTimeZone) -> Result<(String, CustomTz), CalendarError> {
+    match find_property_value(&vtimezone.properties, "TZID") {
+        Some(name) => {
+            unimplemented!();
+        }
+        None => {
+            return Err(CalendarError {
+                msg: "Expecting TZID property for custom timezone".to_string(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,6 +686,7 @@ mod tests {
     TZOFFSETTO:+0000
     END:DAYLIGHT
     END:VTIMEZONE
+
     BEGIN:VTIMEZONE
     TZID:Customized Time Zone
     BEGIN:STANDARD
@@ -673,6 +702,7 @@ mod tests {
     RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3
     END:DAYLIGHT
     END:VTIMEZONE
+
     BEGIN:VEVENT
     DESCRIPTION:Join us for the WWDC21 Apple Keynote broadcasting from Apple Pa
         rk. Watch it online at apple.com.
