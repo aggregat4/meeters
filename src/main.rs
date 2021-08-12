@@ -98,7 +98,7 @@ fn create_indicator() -> AppIndicator {
         None => {
             indicator.set_icon_full("x-office-calendar", "icon");
             indicator
-        }
+        } /*  */
     }
 }
 
