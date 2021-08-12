@@ -103,14 +103,7 @@ fn create_indicator() -> AppIndicator {
 }
 
 fn open_meeting(meet_url: &str) {
-    match gtk::show_uri(
-        None,
-        meet_url,
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time must flow")
-            .as_secs() as u32,
-    ) {
+    match gtk::show_uri(None, meet_url, gtk::get_current_event_time()) {
         Ok(_) => (),
         Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
     }
