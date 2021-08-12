@@ -1,3 +1,7 @@
+///
+/// This code is adapted from chrono-tz at https://github.com/chronotope/chrono-tz/blob/main/src/timezone_impl.rs
+/// Chrono-TZ is dual-licensed under the MIT License and Apache 2.0 Licence.
+///
 use crate::binary_search::binary_search;
 use chrono::{Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, Offset, TimeZone};
 use core::cmp::Ordering;
@@ -9,46 +13,15 @@ pub struct CustomTz {
     timespanset: FixedTimespanSet,
 }
 
-// TODO: this is where I left off:
-// I need to make this custom timezone struct initializable with calculated timespan data (from the VTIMEZONE RRULE)
-
+/// This struct models a custom timezone consisting of spans of time order oldest to newest.
+/// Each span is a slice of time where particular offsets versus UTC need to be applied.
+/// The total offset is the sum of the utc_offset and the dst_offset.
+/// The "first" span is basically from the beginning of time until the first u64 of the first
+/// span of "rest". Each u64 in a span represents the timestamp (epoch in seconds) where the
+/// span starts. The final span starts at its u64 and runs until now and the foreseeable future.
 impl TimeSpans for CustomTz {
     fn timespans(&self) -> FixedTimespanSet {
         self.timespanset.clone()
-        // const REST: &'static [(i64, FixedTimespan)] = &[
-        //     (
-        //         -2717650800,
-        //         FixedTimespan {
-        //             utc_offset: -18000,
-        //             dst_offset: 0,
-        //             name: "EST",
-        //         },
-        //     ),
-        //     (
-        //         -1633280400,
-        //         FixedTimespan {
-        //             utc_offset: -18000,
-        //             dst_offset: 3600,
-        //             name: "EDT",
-        //         },
-        //     ),
-        //     (
-        //         -1615140000,
-        //         FixedTimespan {
-        //             utc_offset: -18000,
-        //             dst_offset: 0,
-        //             name: "EST",
-        //         },
-        //     ),
-        // ];
-        // FixedTimespanSet {
-        //     first: FixedTimespan {
-        //         utc_offset: -17762,
-        //         dst_offset: 0,
-        //         name: "LMT",
-        //     },
-        //     rest: REST,
-        // }
     }
     // const REST: &'static [(i64, FixedTimespan)] = &[
     //     (-2717650800, FixedTimespan { utc_offset: -18000, dst_offset: 0, name: "EST" }),
@@ -426,26 +399,6 @@ impl TimeZone for CustomTz {
         TzOffset::new(self.clone(), timespans.get(index))
     }
 }
-
-// pub struct CustomTz {
-//     name: String,
-//     timespanset: FixedTimespanSet,
-// }
-
-// #[derive(Clone)]
-// pub struct FixedTimespanSet {
-//     pub first: FixedTimespan,
-//     pub rest: &'static [(i64, FixedTimespan)],
-// }
-
-// pub struct FixedTimespan {
-//     /// The base offset from UTC; this usually doesn't change unless the government changes something
-//     pub utc_offset: i32,
-//     /// The additional offset from UTC for this timespan; typically for daylight saving time
-//     pub dst_offset: i32,
-//     /// The name of this timezone, for example the difference between `EDT`/`EST`
-//     pub name: &'static str,
-// }
 
 #[cfg(test)]
 mod tests {
