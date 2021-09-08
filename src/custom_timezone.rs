@@ -9,8 +9,8 @@ use core::fmt::{Debug, Display, Error, Formatter};
 
 #[derive(Clone)]
 pub struct CustomTz {
-    name: String,
-    timespanset: FixedTimespanSet,
+    pub name: String,
+    pub timespanset: FixedTimespanSet,
 }
 
 /// This struct models a custom timezone consisting of spans of time order oldest to newest.
@@ -243,7 +243,7 @@ impl Span {
 #[derive(Clone)]
 pub struct FixedTimespanSet {
     pub first: FixedTimespan,
-    pub rest: &'static [(i64, FixedTimespan)],
+    pub rest: Vec<(i64, FixedTimespan)>,
 }
 
 impl FixedTimespanSet {
@@ -419,7 +419,7 @@ mod tests {
                     dst_offset: 0,
                     name: "CET",
                 },
-                rest: &[(
+                rest: vec![(
                     /*
                      Sunday, August 1, 2021 10:00:00 AM GMT = 1627812000
                     */

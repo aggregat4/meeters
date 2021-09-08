@@ -1,10 +1,5 @@
-use crate::custom_timezone::CustomTz;
-use crate::CalendarError;
-use ical::parser::ical::component::IcalCalendar;
 use ical::parser::ical::component::IcalEvent;
-use ical::parser::ical::component::IcalTimeZone;
 use ical::property::Property;
-use std::collections::HashMap;
 
 pub fn find_property_value(properties: &[Property], name: &str) -> Option<String> {
     for property in properties {
