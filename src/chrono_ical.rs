@@ -1,4 +1,6 @@
+use crate::custom_timezone::CustomTz;
 use chrono_tz::Tz;
+use std::collections::HashMap;
 
 use crate::chrono_windows_timezones::*;
 
@@ -29,9 +31,10 @@ fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
 /// * Explicit timezone strings containing a UTC offset and some cities, e.g. "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
 /// * Windows specific timezone identifiers like "W. Europe Standard Time", these are sourced from https://github.com/unicode-org/cldr/blob/master/common/supplemental/windowsZones.xml
 /// * IANA Timezone identifiers like "Europe/Berlin" (natively supported by chrono-tz)
-pub fn parse_tzid(tzid: &str) -> Result<Tz, String> {
+pub fn parse_tzid(tzid: &str, custom_timezones: &HashMap<String, CustomTz>) -> Result<Tz, String> {
     // TODO: this is a ridiculous form, should be using or_else or something but couldn't get it to
     // work
+    // TODO: custom timezone support, see readme
     match tzid.parse() {
         Ok(tz) => Ok(tz),
         Err(_) => match parse_windows_tzid(tzid) {

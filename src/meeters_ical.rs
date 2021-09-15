@@ -63,14 +63,17 @@ fn parse_ical_datetime(
 /// - a timestamp in zulu time (UTC) (e.g. 20201102T235401Z)
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
-fn extract_ical_datetime(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
+fn extract_ical_datetime(
+    prop: &Property,
+    calendar_timezones: &HashMap<String, CustomTz>,
+) -> Result<DateTime<Tz>, CalendarError> {
     let date_time_str = prop.value.as_ref().unwrap();
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // We are assuming there is only one value in the TZID param
         let tzid = &find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0];
         // println!("We have a TZID: {}", tzid);
-        match parse_tzid(tzid) {
+        match parse_tzid(tzid, &calendar_timezones) {
             Ok(timezone) => parse_ical_datetime(&date_time_str, &timezone, &LOCAL_TZ),
             // in case we can't parse the timezone ID we just default to local, also not optimal
             Err(_) => {
@@ -122,6 +125,7 @@ fn extract_ical_date(prop: &Property) -> Result<DateTime<Tz>, CalendarError> {
 /// the local timezone.
 fn extract_start_end_time(
     ical_event: &IcalEvent,
+    calendar_timezones: &HashMap<String, CustomTz>,
 ) -> Result<(DateTime<Tz>, DateTime<Tz>, bool), CalendarError> {
     // we assume that DTSTART is mandatory, the spec sort of says that but also mentions something called
     // a "METHOD", ignoring that
@@ -153,8 +157,8 @@ fn extract_start_end_time(
         // not a whole day event, so real times, there should be an end time
         match end_property {
             Some(p) => {
-                let start_time = extract_ical_datetime(start_property)?;
-                let end_time = extract_ical_datetime(p)?;
+                let start_time = extract_ical_datetime(start_property, &calendar_timezones)?;
+                let end_time = extract_ical_datetime(p, &calendar_timezones)?;
                 Ok((start_time, end_time, false))
             }
             None => Err(CalendarError {
@@ -184,7 +188,10 @@ fn sanitise_string(input: &str) -> String {
 }
 
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1
-fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
+fn parse_event(
+    ical_event: &IcalEvent,
+    calendar_timezones: &HashMap<String, CustomTz>,
+) -> Result<Event, CalendarError> {
     let summary = sanitise_string(
         &find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string()),
     );
@@ -196,7 +203,8 @@ fn parse_event(ical_event: &IcalEvent) -> Result<Event, CalendarError> {
         &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_else(|| "".to_string()),
     );
     // println!("Parsing event '{}'", summary);
-    let (start_timestamp, end_timestamp, all_day) = extract_start_end_time(&ical_event)?; // ? short circuits the error
+    let (start_timestamp, end_timestamp, all_day) =
+        extract_start_end_time(&ical_event, &calendar_timezones)?; // ? short circuits the error
     let meeturl = parse_zoom_url(&location)
         .or_else(|| parse_zoom_url(&summary))
         .or_else(|| parse_zoom_url(&description));
@@ -344,9 +352,6 @@ fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, Ca
         // Let rrule calculate occurrences
         // Interpret all occurrences as original TZ, then convert to local TZ
         //
-        // let maybe_summary_prop = find_property(&event.properties, "SUMMARY");
-        // println!("SUMMARY: {:?}", maybe_summary_prop.unwrap());
-        //
         // hard assumption that there is a value always in an rrule
         let rrule_value = rrule_prop.value.as_ref().unwrap();
         // RRULE is a bit special, the parameters are not actually in the params but they are encoded in the VALUE of the property
@@ -481,10 +486,11 @@ fn parse_calendar(text: &str) -> Result<Option<IcalCalendar>, CalendarError> {
 
 fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, CalendarError> {
     // TODO: parse custom timezones so we can pass them onto parse_event
+    let calendar_timezones = parse_ical_timezones(&calendar)?;
     calendar
         .events
         .into_iter()
-        .map(|event| match parse_event(&event) {
+        .map(|event| match parse_event(&event, &calendar_timezones) {
             Ok(parsed_event) => Ok((event, parsed_event)),
             Err(e) => Err(e),
         })
@@ -584,7 +590,7 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
 
 /// Parses the VTIMEZONEs from the calendar and returns a map from timezone id to CustomTz
 pub fn parse_ical_timezones(
-    calendar: IcalCalendar,
+    calendar: &IcalCalendar,
 ) -> Result<HashMap<String, CustomTz>, CalendarError> {
     calendar
         .timezones

@@ -80,7 +80,7 @@ fn set_success_icon(indicator: &mut libappindicator::AppIndicator) {
 }
 
 fn create_indicator() -> AppIndicator {
-    let mut indicator = AppIndicator::new("rs-meetings", "");
+    let mut indicator = AppIndicator::new("meeters", "");
     indicator.set_status(AppIndicatorStatus::Active);
     match find_icon_path() {
         Some(icon_path) => {

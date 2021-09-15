@@ -33,8 +33,9 @@ The following properties are supported:
 
 # TODO
 
+* Implement custom timezone suppor: I  am already theoretically able to parse an ical timezone into a CustomTz, which is basically a struct that is copied from chrono_tz and can be customised. That also implements the TimeZone trait which is from chrono::TimeZone, which is probably the key trait. Now in order to wire everything up I need to move from using the Tz generic type to using TimeZone. This means starting at parse_tzid in chrono_ical and then pass it all back along the chain.
 * Colorize the popup menu appointments by past/current/upcoming
-* Try to use `anyhow` and see if that makes error handling better.
+* Try to use `anyhow` (or whatever the current hotness is) and see if that makes error handling better.
 
 # Implementation Details
 
