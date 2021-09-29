@@ -357,6 +357,10 @@ fn parse_occurrences(
             }),
         }
     } else if maybe_tzid_param.is_none() && !dtstart_time_str.ends_with('Z') {
+        // TODO: I left off here: when calling this method from the custom timezone parsing we actually have timestamps that lack any timezone information
+        // in this case it is actually Ok to have RRULE handle those. Maybe add a boolean parameter to this method, or perhaps better have a dedicated method
+        // to parse these timestamps without timezones
+
         // CASE 2: we have local datetimes with no timezone information, throw error?
         Err(CalendarError {
             msg: "Found an event with a local timestamp without a timezone, this is unsupported"
