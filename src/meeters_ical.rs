@@ -4,6 +4,8 @@ use crate::custom_timezone::FixedTimespanSet;
 use chrono::prelude::*;
 use chrono::Duration;
 use chrono_tz::{Tz, UTC};
+use either::Either;
+use either::Left;
 use ical::parser::ical::component::IcalTimeZone;
 use ical::parser::ical::component::IcalTimeZoneTransition;
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
@@ -37,19 +39,42 @@ lazy_static! {
 /// Parses datetimes of the format 'YYYYMMDDTHHMMSS'
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
-fn parse_ical_datetime(
+fn parse_ical_datetime<T: TimeZone>(
     datetime: &str,
-    tz: &Tz,
-    target_tz: &Tz,
-) -> Result<DateTime<Tz>, CalendarError> {
+    tz: &Either<Tz, &CustomTz>,
+    target_tz: &T,
+) -> Result<DateTime<T>, CalendarError> {
     match NaiveDateTime::parse_from_str(&datetime, "%Y%m%dT%H%M%S") {
         Ok(d) => {
-            let converted = tz.from_local_datetime(&d).unwrap().with_timezone(target_tz);
+            if tz.is_left() {
+                //                if target_tz.is_left() {
+                Ok(tz
+                    .left()
+                    .unwrap()
+                    .from_local_datetime(&d)
+                    .unwrap()
+                    .with_timezone(&target_tz))
+            /*                } else {
+                let foo = tz
+                    .left()
+                    .unwrap()
+                    .from_local_datetime(&d)
+                    .unwrap()
+                    .with_timezone(target_tz.right().unwrap());
+                Ok()
+            }*/
+            } else {
+                Ok(tz
+                    .right()
+                    .unwrap()
+                    .from_local_datetime(&d)
+                    .unwrap()
+                    .with_timezone(&target_tz))
+            }
             // println!(
             //     "Converting timezones between {} and {}, which means {} to {}",
             //     tz, target_tz, datetime, converted
             // );
-            Ok(converted)
         }
         Err(_) => Err(CalendarError {
             msg: "Can't parse datetime string with tzid".to_string(),
@@ -78,7 +103,7 @@ fn extract_ical_datetime(
             // in case we can't parse the timezone ID we just default to local, also not optimal
             Err(_) => {
                 // println!("We have an error parsing the source tzid");
-                parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ)
+                parse_ical_datetime(&date_time_str, &Left(*LOCAL_TZ), &LOCAL_TZ)
             }
         }
     } else {
@@ -87,10 +112,14 @@ fn extract_ical_datetime(
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
             // println!("We assume UTC because of Z");
-            parse_ical_datetime(&date_time_str.strip_suffix("Z").unwrap(), &UTC, &LOCAL_TZ)
+            parse_ical_datetime(
+                &date_time_str.strip_suffix("Z").unwrap(),
+                &Left(UTC),
+                &LOCAL_TZ,
+            )
         } else {
             // println!("We use the local timezone as the originating timezone");
-            parse_ical_datetime(&date_time_str, &LOCAL_TZ, &LOCAL_TZ)
+            parse_ical_datetime(&date_time_str, &Left(*LOCAL_TZ), &LOCAL_TZ)
         }
     }
 }
@@ -266,7 +295,10 @@ fn strip_param(p: &Property, param_name: &str) -> (Property, Option<String>) {
 ///   -> In this case we need to convert the EXDATE and DTSTART to UTC, feed that together with
 ///      the original RRULE to the library and save the timzone we identified in DTSTART.
 ///      We then convert all occurrences to the local timezone from UTC.
-fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, CalendarError> {
+fn parse_occurrences(
+    properties: &Vec<Property>,
+    custom_timezones: &HashMap<String, CustomTz>,
+) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     // if no DTSTART or RRULE is present we can't do anything and assume we can't calculate occurrences
     let maybe_dtstart_prop = find_property(&properties, "DTSTART");
     let maybe_rrule_prop = find_property(&properties, "RRULE");
@@ -281,7 +313,7 @@ fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, Ca
         .as_ref()
         .and_then(|params| find_param(&params, "TZID"));
     let maybe_original_tz = if let Some(tzid_param) = maybe_tzid_param {
-        match parse_tzid(&tzid_param[0]) {
+        match parse_tzid(&tzid_param[0], custom_timezones) {
             Ok(original_tz) => Some(original_tz),
             Err(e) => {
                 return Err(CalendarError {
@@ -349,6 +381,7 @@ fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, Ca
         // We strip the tz from the DTSTART and EXDATE and let rrule just regard them as naked timestamps
         // We do need to manually convert the UNTIL parameter of the RRULE to the original TZ since that
         // will always be UTC and if don't convert we can miss the last meeting of the interval
+        //
         // Let rrule calculate occurrences
         // Interpret all occurrences as original TZ, then convert to local TZ
         //
@@ -362,14 +395,25 @@ fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, Ca
                 if let Some(until_value) = rrule_component.strip_prefix("UNTIL=") {
                     if until_value.ends_with("Z") {
                         // NOTE we do not check whether maybe the parse failed, we hard assume it does
-                        let until_originaltz = parse_ical_datetime(
-                            &until_value.to_string().strip_suffix("Z").unwrap(),
-                            &UTC,
-                            &original_tz,
-                        )
-                        .unwrap();
-                        let until_originaltz_str =
-                            until_originaltz.format("%Y%m%dT%H%M%S").to_string();
+                        let until_originaltz_str = if original_tz.is_left() {
+                            parse_ical_datetime(
+                                &until_value.to_string().strip_suffix("Z").unwrap(),
+                                &Left(UTC),
+                                &original_tz.left().unwrap(),
+                            )
+                            .unwrap()
+                            .format("%Y%m%dT%H%M%S")
+                            .to_string()
+                        } else {
+                            parse_ical_datetime(
+                                &until_value.to_string().strip_suffix("Z").unwrap(),
+                                &Left(UTC),
+                                original_tz.right().unwrap(),
+                            )
+                            .unwrap()
+                            .format("%Y%m%dT%H%M%S")
+                            .to_string()
+                        };
                         format!("UNTIL={}", until_originaltz_str)
                     } else {
                         rrule_component.to_string()
@@ -405,10 +449,21 @@ fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, Ca
                     //         .unwrap()
                     //         .with_timezone(&local_tz)
                     // );
-                    original_tz
-                        .from_local_datetime(&original_datetime)
-                        .unwrap()
-                        .with_timezone(&local_tz)
+                    if original_tz.is_left() {
+                        original_tz
+                            .left()
+                            .unwrap()
+                            .from_local_datetime(&original_datetime)
+                            .unwrap()
+                            .with_timezone(&local_tz)
+                    } else {
+                        original_tz
+                            .right()
+                            .unwrap()
+                            .from_local_datetime(&original_datetime)
+                            .unwrap()
+                            .with_timezone(&local_tz)
+                    }
                 })
                 .collect()),
             Err(e) => Err(CalendarError {
@@ -427,6 +482,7 @@ fn parse_occurrences(properties: &Vec<Property>) -> Result<Vec<DateTime<Tz>>, Ca
 /// all the modifying events.
 fn partition_modifying_events(
     events: &[(IcalEvent, Event)],
+    calendar_timezones: &HashMap<String, CustomTz>,
 ) -> (
     MultiMap<String, (IcalEvent, Event)>,
     Vec<(IcalEvent, Event)>,
@@ -440,7 +496,7 @@ fn partition_modifying_events(
         // presence of a RECURRENCE-ID property is the trigger to know this is a modifying event
         if let Some(recurrence_id_property) = find_property(&ical_event.properties, "RECURRENCE-ID")
         {
-            match extract_ical_datetime(&recurrence_id_property) {
+            match extract_ical_datetime(&recurrence_id_property, &calendar_timezones) {
                 Ok(_) => {
                     if let Some(uid) = find_property_value(&ical_event.properties, "UID") {
                         // println!("+MODIFYING EVENT: {:?}", ical_event);
@@ -484,9 +540,10 @@ fn parse_calendar(text: &str) -> Result<Option<IcalCalendar>, CalendarError> {
     }
 }
 
-fn parse_events(calendar: IcalCalendar) -> Result<Vec<(IcalEvent, Event)>, CalendarError> {
-    // TODO: parse custom timezones so we can pass them onto parse_event
-    let calendar_timezones = parse_ical_timezones(&calendar)?;
+fn parse_events(
+    calendar: IcalCalendar,
+    calendar_timezones: &HashMap<String, CustomTz>,
+) -> Result<Vec<(IcalEvent, Event)>, CalendarError> {
     calendar
         .events
         .into_iter()
@@ -502,6 +559,7 @@ fn calculate_occurrences(
     parsed_event: &Event,
     occurrences: &[DateTime<Tz>],
     modifying_events: &MultiMap<String, (IcalEvent, Event)>,
+    calendar_timezones: &HashMap<String, CustomTz>,
 ) -> Vec<Event> {
     occurrences
         .iter()
@@ -521,7 +579,7 @@ fn calculate_occurrences(
                     //     parsed_event.summary
                     // );
                     let recurrence_datetime =
-                        extract_ical_datetime(recurrence_id_property).unwrap();
+                        extract_ical_datetime(recurrence_id_property, &calendar_timezones).unwrap();
                     if *datetime == recurrence_datetime {
                         // the modifying event has the same UID as our event and it has the same timestamp, so we return the modification instead
                         return modifying_event.clone();
@@ -552,16 +610,17 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
     println!("Local Timezone configured as {}", tz);
     match parse_calendar(text)? {
         Some(calendar) => {
-            let event_tuples = parse_events(calendar)?;
+            let calendar_timezones = parse_ical_timezones(&calendar)?;
+            let event_tuples = parse_events(calendar, &calendar_timezones)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
             let (modifying_events, non_modifying_events) =
-                partition_modifying_events(&event_tuples);
+                partition_modifying_events(&event_tuples, &calendar_timezones);
             // Calculate occurrences for recurring events
             non_modifying_events
                 .into_iter()
-                .map(
-                    |(ical_event, parsed_event)| match parse_occurrences(&ical_event.properties) {
+                .map(|(ical_event, parsed_event)| {
+                    match parse_occurrences(&ical_event.properties, &calendar_timezones) {
                         Ok(occurrences) => {
                             // println!("Occurrences for {:?}: {:?}", ical_event, occurrences);
                             if occurrences.is_empty() {
@@ -572,12 +631,13 @@ pub fn extract_events(text: &str) -> Result<Vec<Event>, CalendarError> {
                                     &parsed_event,
                                     &occurrences,
                                     &modifying_events,
+                                    &calendar_timezones,
                                 ))
                             }
                         }
                         Err(e) => Err(e),
-                    },
-                )
+                    }
+                })
                 // we now have replaced each event with a list of its occurrences
                 .collect::<Result<Vec<Vec<Event>>, CalendarError>>()
                 .map(|event_instances| {
@@ -594,7 +654,7 @@ pub fn parse_ical_timezones(
 ) -> Result<HashMap<String, CustomTz>, CalendarError> {
     calendar
         .timezones
-        .into_iter()
+        .iter()
         .map(|vtimezone| parse_ical_timezone(&vtimezone))
         .collect()
 }
@@ -642,8 +702,9 @@ fn parse_timespansets(vtimezone: &IcalTimeZone) -> Result<FixedTimespanSet, Cale
     // })?;
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times
     let mut transition_points: Vec<TransitionPoint> = vec![];
+    let empty_map = HashMap::new();
     for (pos, transition) in transitions.iter().enumerate() {
-        match parse_occurrences(&transition.properties) {
+        match parse_occurrences(&transition.properties, &empty_map) {
             Ok(occurrences) => {
                 for dt in occurrences {
                     transition_points.push(TransitionPoint {

@@ -1,5 +1,8 @@
 use crate::custom_timezone::CustomTz;
 use chrono_tz::Tz;
+use either::Either;
+use either::Left;
+use either::Right;
 use std::collections::HashMap;
 
 use crate::chrono_windows_timezones::*;
@@ -31,10 +34,19 @@ fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
 /// * Explicit timezone strings containing a UTC offset and some cities, e.g. "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
 /// * Windows specific timezone identifiers like "W. Europe Standard Time", these are sourced from https://github.com/unicode-org/cldr/blob/master/common/supplemental/windowsZones.xml
 /// * IANA Timezone identifiers like "Europe/Berlin" (natively supported by chrono-tz)
-pub fn parse_tzid(tzid: &str, custom_timezones: &HashMap<String, CustomTz>) -> Result<Tz, String> {
+pub fn parse_tzid<'a>(
+    tzid: &str,
+    custom_timezones: &'a HashMap<String, CustomTz>,
+) -> Result<Either<Tz, &'a CustomTz>, String> {
     // TODO: this is a ridiculous form, should be using or_else or something but couldn't get it to
     // work
-    // TODO: custom timezone support, see readme
+    match custom_timezones.get(tzid) {
+        Some(tz) => Ok(Right(tz)),
+        None => Ok(Left(parse_standard_tz(tzid)?)),
+    }
+}
+
+pub fn parse_standard_tz(tzid: &str) -> Result<Tz, String> {
     match tzid.parse() {
         Ok(tz) => Ok(tz),
         Err(_) => match parse_windows_tzid(tzid) {
@@ -54,23 +66,27 @@ mod tests {
 
     #[test]
     fn parses_iana_strings() {
-        assert_eq!(Berlin, parse_tzid("Europe/Berlin").unwrap());
+        assert_eq!(Berlin, parse_standard_tz("Europe/Berlin").unwrap());
     }
 
     #[test]
     fn parses_windows_strings() {
-        assert_eq!(Berlin, parse_tzid("W. Europe Standard Time").unwrap());
+        assert_eq!(
+            Berlin,
+            parse_standard_tz("W. Europe Standard Time").unwrap()
+        );
     }
 
     #[test]
     fn parses_fucked_windows_strings() {
         assert_eq!(
             Vienna,
-            parse_tzid("(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna").unwrap()
+            parse_standard_tz("(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna")
+                .unwrap()
         );
         assert_eq!(
             Dublin,
-            parse_tzid("(UTC+00:00) Dublin, Edinburgh, Lisbon, London").unwrap()
+            parse_standard_tz("(UTC+00:00) Dublin, Edinburgh, Lisbon, London").unwrap()
         );
     }
 }

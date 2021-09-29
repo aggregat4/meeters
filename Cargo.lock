@@ -993,6 +993,7 @@ dependencies = [
  "chrono-tz",
  "directories",
  "dotenv",
+ "either",
  "glib 0.14.5",
  "gtk",
  "ical",
