@@ -31,21 +31,24 @@ fn parse_explicit_tzid(tzid: &str) -> Result<Tz, String> {
 
 /// Parses a TZID string as it may occur in an ical event and returns a chrono-tz timezone.
 /// This supports the following formats:
-/// * Explicit timezone strings containing a UTC offset and some cities, e.g. "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
-/// * Windows specific timezone identifiers like "W. Europe Standard Time", these are sourced from https://github.com/unicode-org/cldr/blob/master/common/supplemental/windowsZones.xml
-/// * IANA Timezone identifiers like "Europe/Berlin" (natively supported by chrono-tz)
+/// * If you provide a custom timezone map then that is checked first
+/// * If no custom timezones are provided, it will defer to standardized timezone definitions
 pub fn parse_tzid<'a>(
     tzid: &str,
     custom_timezones: &'a HashMap<String, CustomTz>,
 ) -> Result<Either<Tz, &'a CustomTz>, String> {
-    // TODO: this is a ridiculous form, should be using or_else or something but couldn't get it to
-    // work
     match custom_timezones.get(tzid) {
-        Some(tz) => Ok(Right(tz)),
+        Some(tz) => {
+            return Ok(Right(tz));
+        }
         None => Ok(Left(parse_standard_tz(tzid)?)),
     }
 }
 
+/// Formats supported:
+/// * Explicit timezone strings containing a UTC offset and some cities, e.g. "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
+/// * Windows specific timezone identifiers like "W. Europe Standard Time", these are sourced from https://github.com/unicode-org/cldr/blob/master/common/supplemental/windowsZones.xml
+/// * IANA Timezone identifiers like "Europe/Berlin" (natively supported by chrono-tz)
 pub fn parse_standard_tz(tzid: &str) -> Result<Tz, String> {
     match tzid.parse() {
         Ok(tz) => Ok(tz),

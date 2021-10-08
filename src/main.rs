@@ -375,7 +375,7 @@ fn main() -> std::io::Result<()> {
                         events_sender
                             .send(Err(()))
                             .expect("Channel should be sendable");
-                        println!("Error getting events: {:?}", e.msg);
+                        eprintln!("Error getting events: {:?}", e.msg);
                     }
                 }
             }

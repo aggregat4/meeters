@@ -357,10 +357,6 @@ fn parse_occurrences(
             }),
         }
     } else if maybe_tzid_param.is_none() && !dtstart_time_str.ends_with('Z') {
-        // TODO: I left off here: when calling this method from the custom timezone parsing we actually have timestamps that lack any timezone information
-        // in this case it is actually Ok to have RRULE handle those. Maybe add a boolean parameter to this method, or perhaps better have a dedicated method
-        // to parse these timestamps without timezones
-
         // CASE 2: we have local datetimes with no timezone information, throw error?
         Err(CalendarError {
             msg: "Found an event with a local timestamp without a timezone, this is unsupported"
@@ -507,7 +503,7 @@ fn partition_modifying_events(
                         modifying_events.insert(uid, (ical_event.clone(), event.clone()));
                     }
                 }
-                Err(e) => println!("Can't parse a recurrence id as datetime: {:?}", e),
+                Err(e) => eprintln!("Can't parse a recurrence id as datetime: {:?}", e),
             }
         } else {
             // println!("NON-MODIFYING EVENT: {:?}", ical_event);
@@ -659,6 +655,10 @@ pub fn parse_ical_timezones(
     calendar
         .timezones
         .iter()
+        // We filter out timezones called UTC since that is some outlook horseshit which is a timezone definition without an RRULE and a zero offset (really)
+        .filter(|vtimezone| {
+            find_property_value(&vtimezone.properties, "TZID").unwrap_or("".to_string()) != "UTC"
+        })
         .map(|vtimezone| parse_ical_timezone(&vtimezone))
         .collect()
 }
@@ -670,6 +670,11 @@ fn parse_ical_timezone(vtimezone: &IcalTimeZone) -> Result<(String, CustomTz), C
                 name: name.to_string(),
                 timespanset: parse_timespansets(&vtimezone)?, // pass on the error
             };
+            println!(
+                "Parsed custom timezone definition '{:?}' with '{:?}' spans",
+                timezone.name,
+                timezone.timespanset.rest.len()
+            );
             return Ok((name, timezone));
         }
         None => {
@@ -677,6 +682,63 @@ fn parse_ical_timezone(vtimezone: &IcalTimeZone) -> Result<(String, CustomTz), C
                 msg: "Expecting TZID property for custom timezone".to_string(),
             })
         }
+    }
+}
+
+/// We assume there is no TZ identifier with timespan DTSTARTS
+/// This is in the spec. See https://icalendar.org/iCalendar-RFC-5545/3-6-5-time-zone-component.html
+/// "DTSTART" in this usage MUST be specified as a date with a local time value."
+///
+/// Additionally we move the starting year forward to 2 years before now since we are not interested
+/// in historical events and typical VTIMEZONE definitions start many hundreds of years in the past.
+/// This allows us to generate many fewer timespansets and preserve memory and performance.
+fn parse_occurrences_from_timespan(
+    properties: &Vec<Property>,
+) -> Result<Vec<DateTime<Tz>>, CalendarError> {
+    let maybe_dtstart_prop = find_property(&properties, "DTSTART");
+    let maybe_rrule_prop = find_property(&properties, "RRULE");
+    if maybe_dtstart_prop.is_none() || maybe_rrule_prop.is_none() {
+        return Err(CalendarError {
+            msg: "Invalid RRULE definition for timespan, missing DTSTART or RRULE".to_string(),
+        });
+    }
+    let mut rule_props = vec![];
+    rule_props.push(maybe_rrule_prop.unwrap().clone());
+    let dtstart_prop = normalize_start_year(maybe_dtstart_prop.unwrap(), -2);
+    rule_props.push(dtstart_prop.clone());
+    // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
+    let event_as_string = properties_to_string(&rule_props);
+    // TODO: move to using the rrule iter approach to save on generating spurious occurrences (do that everywhere)
+    /*
+    let occurences_between_dates: Vec<_> = rrule.clone()
+        .into_iter()
+        .skip_while(|d| if inc { *d <= after } else { *d < after })
+        .take_while(|d| if inc { *d <= before } else { *d < before })
+        .collect();
+    assert_eq!(occurences_between_dates, rrule.between(after, before, inc));
+
+    */
+    match event_as_string.parse::<RRuleSet>() {
+        Ok(ruleset) => Ok(ruleset.all()),
+        Err(e) => Err(CalendarError {
+            msg: format!("error in RRULE parsing: {}", e),
+        }),
+    }
+}
+
+fn normalize_start_year(dtstart_prop: &Property, yearoffset: i32) -> Property {
+    let timestamp = dtstart_prop.value.as_ref().unwrap();
+    let timestamp_year = timestamp[..4].parse::<i32>().unwrap();
+    let current_year = Local::now().year();
+    assert!(timestamp_year < current_year, "The starting year specified in a custom VTIMETONE definition must be before the actual current year");
+    let normalized_year = current_year + yearoffset;
+    let mut new_timestamp = normalized_year.to_string();
+    new_timestamp.push_str(&timestamp[4..]);
+    println!("New timestamp for dtstart {:?} ", new_timestamp);
+    Property {
+        name: dtstart_prop.name.clone(),
+        params: None,
+        value: Some(new_timestamp),
     }
 }
 
@@ -701,15 +763,12 @@ fn parse_timespansets(vtimezone: &IcalTimeZone) -> Result<FixedTimespanSet, Cale
         .map(|vtimezone_transition| parse_icaltimezonetransition(&vtimezone_transition))
         .collect::<Result<Vec<TimezoneTransition>, CalendarError>>()?; // collect moves the result to the outer scope and doing '?' will fail the operation at the first Err
     assert_eq!(2, transitions.len());
-    // let tzid = find_property_value(&vtimezone.properties, "TZID").ok_or(CalendarError {
-    //     msg: "no TZID in timezone transition".to_string(),
-    // })?;
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times
     let mut transition_points: Vec<TransitionPoint> = vec![];
-    let empty_map = HashMap::new();
     for (pos, transition) in transitions.iter().enumerate() {
-        match parse_occurrences(&transition.properties, &empty_map) {
+        match parse_occurrences_from_timespan(&transition.properties) {
             Ok(occurrences) => {
+                println!("parsed occurrences for timespan transition: {:?}", occurrences.len());
                 for dt in occurrences {
                     transition_points.push(TransitionPoint {
                         timestamp: dt.timestamp(),
@@ -719,7 +778,7 @@ fn parse_timespansets(vtimezone: &IcalTimeZone) -> Result<FixedTimespanSet, Cale
             }
             Err(e) => {
                 return Err(CalendarError {
-                    msg: format!("error in RRULE parsing for timezone transition: {}", e),
+                    msg: format!("error in RRULE parsing for timezone transition: {}, this is for ical timezone {:?}", e, vtimezone),
                 })
             }
         }
@@ -931,6 +990,40 @@ mod tests {
     X-MICROSOFT-DISALLOW-COUNTER:FALSE
     END:VEVENT
     END:VCALENDAR
+
+        */
+
+    /*
+            Outlook timezone definition example
+
+    BEGIN:VTIMEZONE
+    TZID:W. Europe Standard Time
+    BEGIN:STANDARD
+    DTSTART:16010101T030000
+    TZOFFSETFROM:+0200
+    TZOFFSETTO:+0100
+    RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10
+    END:STANDARD
+    BEGIN:DAYLIGHT
+    DTSTART:16010101T020000
+    TZOFFSETFROM:+0100
+    TZOFFSETTO:+0200
+    RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3
+    END:DAYLIGHT
+    END:VTIMEZONE
+    BEGIN:VTIMEZONE
+    TZID:UTC
+    BEGIN:STANDARD
+    DTSTART:16010101T000000
+    TZOFFSETFROM:+0000
+    TZOFFSETTO:+0000
+    END:STANDARD
+    BEGIN:DAYLIGHT
+    DTSTART:16010101T000000
+    TZOFFSETFROM:+0000
+    TZOFFSETTO:+0000
+    END:DAYLIGHT
+    END:VTIMEZONE
 
         */
 }

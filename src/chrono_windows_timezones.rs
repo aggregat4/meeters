@@ -28,7 +28,7 @@ fn read_windows_zones() -> HashMap<String, Tz> {
 							tzmap.insert(n.attribute("other").unwrap().to_string(), tz);
 						}
 						Err(e) => {
-							println!("Error parsing iana tz string: {}", e);
+							eprintln!("Error parsing iana tz string: {}", e);
 						}
 					})
 			}
@@ -49,7 +49,7 @@ fn read_fucked_windows_zones() -> HashMap<String, Tz> {
 				tzmap.insert(fucked_windows.to_string(), fucked_tz);
 			}
 			Err(e) => {
-				println!("Could not parse tz: {}", e);
+				eprintln!("Could not parse tz: {}", e);
 			}
 		}
 	});

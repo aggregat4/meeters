@@ -7,7 +7,7 @@ use chrono::{Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, Offse
 use core::cmp::Ordering;
 use core::fmt::{Debug, Display, Error, Formatter};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CustomTz {
     pub name: String,
     pub timespanset: FixedTimespanSet,
@@ -240,7 +240,7 @@ impl Span {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FixedTimespanSet {
     pub first: FixedTimespan,
     pub rest: Vec<(i64, FixedTimespan)>,
