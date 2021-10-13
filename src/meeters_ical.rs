@@ -338,6 +338,11 @@ fn parse_occurrences(
     }
     // need to do this silly conversion as otherwise the with_timezone call below doesn't work correctly
     let local_tz = *LOCAL_TZ;
+    let current_year = Local::now().year();
+    let skip_occurrence_pred = |d: &DateTime<Tz>| d.year() < (current_year - 1);
+    let take_occurrence_pred =
+        |d: &DateTime<Tz>| d.year() >= (current_year - 1) && d.year() <= (current_year + 1);
+    //let take_occurrence_pred =
     // Case 1: DTSTART is a DATE
     if all_day_event {
         rule_props.push(rrule_prop.clone());
@@ -346,6 +351,8 @@ fn parse_occurrences(
             Ok(ruleset) => Ok(ruleset
                 .all()
                 .iter()
+                .skip_while(|d| skip_occurrence_pred(d))
+                .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
                     local_tz
                         .ymd(dt.year(), dt.month(), dt.day())
@@ -370,6 +377,8 @@ fn parse_occurrences(
             Ok(ruleset) => Ok(ruleset
                 .all()
                 .iter()
+                .skip_while(|d| skip_occurrence_pred(d))
+                .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| dt.with_timezone(&local_tz))
                 .collect()),
             Err(e) => Err(CalendarError {
@@ -436,6 +445,8 @@ fn parse_occurrences(
             Ok(ruleset) => Ok(ruleset
                 .all()
                 .iter()
+                .skip_while(|d| skip_occurrence_pred(d))
+                .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
                     let original_datetime = &NaiveDateTime::new(
                         NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()),
@@ -704,41 +715,46 @@ fn parse_occurrences_from_timespan(
     }
     let mut rule_props = vec![];
     rule_props.push(maybe_rrule_prop.unwrap().clone());
-    let dtstart_prop = normalize_start_year(maybe_dtstart_prop.unwrap(), -2);
-    rule_props.push(dtstart_prop.clone());
+    rule_props.push(maybe_dtstart_prop.unwrap().clone());
     // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
     let event_as_string = properties_to_string(&rule_props);
-    // TODO: move to using the rrule iter approach to save on generating spurious occurrences (do that everywhere)
-    /*
-    let occurences_between_dates: Vec<_> = rrule.clone()
-        .into_iter()
-        .skip_while(|d| if inc { *d <= after } else { *d < after })
-        .take_while(|d| if inc { *d <= before } else { *d < before })
-        .collect();
-    assert_eq!(occurences_between_dates, rrule.between(after, before, inc));
-
-    */
+    let current_year = Local::now().year();
     match event_as_string.parse::<RRuleSet>() {
-        Ok(ruleset) => Ok(ruleset.all()),
+        // We only take occurrences in a short interval around the current year since we are
+        // only interested in current dates
+        // NOTE: could we ever run into the problem that a timezone has some historical
+        // transition way back into the past but no current ones? This could happen for
+        // a country deciding to dump daylight savings, right?
+        Ok(ruleset) => {
+            let relevant_transitions: Vec<DateTime<Tz>> = ruleset
+                .clone()
+                .into_iter()
+                .skip_while(|d| d.year() < (current_year - 2))
+                .take_while(|d| d.year() < (current_year + 2))
+                .collect();
+            if relevant_transitions.is_empty() {
+                // There could be a case where there are no transitions around our current year.
+                // For example for a country that dropped daylight savings at some point in the
+                // past. For this case we return simply the last 4 transitions coming right
+                // before the current year
+                let all_transitions_before_now: Vec<DateTime<Tz>> = ruleset
+                    .clone()
+                    .into_iter()
+                    .take_while(|d| d.year() < current_year)
+                    .collect();
+                Ok(all_transitions_before_now
+                    .into_iter()
+                    .rev()
+                    .take(4)
+                    .rev()
+                    .collect())
+            } else {
+                Ok(relevant_transitions)
+            }
+        }
         Err(e) => Err(CalendarError {
             msg: format!("error in RRULE parsing: {}", e),
         }),
-    }
-}
-
-fn normalize_start_year(dtstart_prop: &Property, yearoffset: i32) -> Property {
-    let timestamp = dtstart_prop.value.as_ref().unwrap();
-    let timestamp_year = timestamp[..4].parse::<i32>().unwrap();
-    let current_year = Local::now().year();
-    assert!(timestamp_year < current_year, "The starting year specified in a custom VTIMETONE definition must be before the actual current year");
-    let normalized_year = current_year + yearoffset;
-    let mut new_timestamp = normalized_year.to_string();
-    new_timestamp.push_str(&timestamp[4..]);
-    println!("New timestamp for dtstart {:?} ", new_timestamp);
-    Property {
-        name: dtstart_prop.name.clone(),
-        params: None,
-        value: Some(new_timestamp),
     }
 }
 
