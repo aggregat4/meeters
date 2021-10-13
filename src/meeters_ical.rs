@@ -784,7 +784,6 @@ fn parse_timespansets(vtimezone: &IcalTimeZone) -> Result<FixedTimespanSet, Cale
     for (pos, transition) in transitions.iter().enumerate() {
         match parse_occurrences_from_timespan(&transition.properties) {
             Ok(occurrences) => {
-                println!("parsed occurrences for timespan transition: {:?}", occurrences.len());
                 for dt in occurrences {
                     transition_points.push(TransitionPoint {
                         timestamp: dt.timestamp(),
