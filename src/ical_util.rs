@@ -64,7 +64,7 @@ pub fn prop_to_string(prop: &Property) -> String {
     return format!(
         "{}{}:{}",
         prop.name,
-        params_to_string(&prop.params.as_ref().unwrap_or(&vec![])),
+        params_to_string(prop.params.as_ref().unwrap_or(&vec![])),
         prop.value.as_ref().unwrap_or(&"".to_string())
     );
 }
@@ -72,7 +72,7 @@ pub fn prop_to_string(prop: &Property) -> String {
 pub fn properties_to_string(properties: &[Property]) -> String {
     properties
         .iter() // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
-        .map(|p| prop_to_string(&p))
+        .map(|p| prop_to_string(p))
         .collect::<Vec<String>>()
         .join("\n")
 }

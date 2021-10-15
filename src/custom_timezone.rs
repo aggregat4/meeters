@@ -155,9 +155,9 @@ impl TzOffset {
     fn map_localresult(tz: CustomTz, result: LocalResult<FixedTimespan>) -> LocalResult<Self> {
         match result {
             LocalResult::None => LocalResult::None,
-            LocalResult::Single(s) => LocalResult::Single(TzOffset::new(tz.clone(), s)),
+            LocalResult::Single(s) => LocalResult::Single(TzOffset::new(tz, s)),
             LocalResult::Ambiguous(a, b) => {
-                LocalResult::Ambiguous(TzOffset::new(tz.clone(), a), TzOffset::new(tz.clone(), b))
+                LocalResult::Ambiguous(TzOffset::new(tz.clone(), a), TzOffset::new(tz, b))
             }
         }
     }

@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::path::PathBuf;
 use std::thread;
 
@@ -36,11 +37,9 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
     }
 }
 
-fn has_icons(dir: &PathBuf) -> bool {
-    let normal_icon_path = dir.as_path().with_file_name("meeters-appindicator.png");
-    let error_icon_path = dir
-        .as_path()
-        .with_file_name("meeters-appindicator-error.png");
+fn has_icons(dir: &Path) -> bool {
+    let normal_icon_path = dir.with_file_name("meeters-appindicator.png");
+    let error_icon_path = dir.with_file_name("meeters-appindicator-error.png");
     normal_icon_path.exists() && error_icon_path.exists()
 }
 
@@ -251,8 +250,9 @@ fn show_event_notification(event: Event) {
             .show()
             .unwrap()
             .wait_for_action(|action| {
-                if action.starts_with(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING) {
-                    open_meeting(&action[MEETERS_NOTIFICATION_ACTION_OPEN_MEETING.len()..]);
+                if let Some(meeting) = action.strip_prefix(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING)
+                {
+                    open_meeting(meeting);
                 }
             });
     } else {

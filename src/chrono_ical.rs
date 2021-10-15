@@ -38,9 +38,7 @@ pub fn parse_tzid<'a>(
     custom_timezones: &'a HashMap<String, CustomTz>,
 ) -> Result<Either<Tz, &'a CustomTz>, String> {
     match custom_timezones.get(tzid) {
-        Some(tz) => {
-            return Ok(Right(tz));
-        }
+        Some(tz) => Ok(Right(tz)),
         None => Ok(Left(parse_standard_tz(tzid)?)),
     }
 }
