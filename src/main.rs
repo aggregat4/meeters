@@ -1,3 +1,5 @@
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::path::Path;
 use std::path::PathBuf;
 use std::thread;
@@ -102,7 +104,35 @@ fn create_indicator() -> AppIndicator {
 }
 
 fn open_meeting(meet_url: &str) {
-    match gtk::show_uri(None, meet_url, gtk::get_current_event_time()) {
+    lazy_static! {
+        static ref ZOOM_FULL_MEETING_REGEX: regex::Regex =
+            Regex::new(r"https?://[^\s]*zoom.us/j/([0-9]+)(\?.*pwd=([A-Za-z0-9]+))?").unwrap();
+    }
+    // this is an attempt to transform a zoom http link to a zommtg: link
+    // these links bypass opening a new browser tab and go into zoom directly
+    // sadly we can't use this for personal meeting rooms though, only full meeting
+    // IDs
+    let final_url = if let Some(_) = ZOOM_FULL_MEETING_REGEX.find(meet_url) {
+        let caps = ZOOM_FULL_MEETING_REGEX.captures(meet_url).unwrap();
+        let meet_id = caps.get(1);
+        let password = caps.get(3);
+        if password.is_some() {
+            format!(
+                "zoommtg://zoom.us/join?confno={}&pwd={}",
+                meet_id.unwrap().as_str(),
+                password.unwrap().as_str()
+            )
+        } else {
+            format!(
+                "zoommtg://zoom.us/join?confno={}",
+                meet_id.unwrap().as_str()
+            )
+        }
+    } else {
+        meet_url.to_string()
+    };
+    println!("final URL for meeting: {:?}", final_url);
+    match gtk::show_uri(None, &final_url, gtk::current_event_time()) {
         Ok(_) => (),
         Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
     }
@@ -112,7 +142,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     let m: Menu = gtk::Menu::new();
     if events.is_empty() {
         let item = gtk::MenuItem::with_label("test");
-        let label = item.get_child().unwrap();
+        let label = item.child().unwrap();
         (label.downcast::<gtk::Label>())
             .unwrap()
             .set_markup("<b>No Events Today</b>");
@@ -148,7 +178,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             // to have text that was only selectable/highlighted until the end of the text but not
             // the end of the menu item
             let item = gtk::MenuItem::with_label("Test");
-            let label = item.get_child().unwrap().downcast::<gtk::Label>().unwrap();
+            let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
             // we used to format this text with markup and uset set_markup but that causes potential
             // escaping issues and we just default to plain text now
             let now = Local::now();
@@ -252,6 +282,7 @@ fn show_event_notification(event: Event) {
             .wait_for_action(|action| {
                 if let Some(meeting) = action.strip_prefix(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING)
                 {
+                    println!("About to open {:?}", meeting);
                     open_meeting(meeting);
                 }
             });
@@ -294,16 +325,6 @@ fn main() -> std::io::Result<()> {
     };
     // magic incantation for gtk
     gtk::init().unwrap();
-    // I can't get styles to work in appindicators
-    // // Futzing with styles
-    // let style = "label { color: red; }";
-    // let provider = CssProvider::new();
-    // provider.load_from_data(style.as_ref()).unwrap();
-    // gtk::StyleContext::add_provider_for_screen(
-    //     &gdk::Screen::get_default().expect("Error initializing gtk css provider."),
-    //     &provider,
-    //     gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    // );
     // set up our widgets
     let mut indicator = create_indicator();
     let mut menu = create_indicator_menu(&[]);

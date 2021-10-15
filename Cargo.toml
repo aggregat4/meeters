@@ -12,18 +12,19 @@ include = ["assets/*"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libappindicator = "0.5.2"
-gtk = "0.9.2"
+libappindicator = "0.6.1"
+gtk = "0.14.3"
 glib = "0.14.5"
 ureq = "2.1.0"
 ical = "0.7.0"
 property = "0.3.3"
 chrono = "0.4.19"
+# rrule uses 0.5.3 so we can't go to 0.6 yet
 chrono-tz = "0.5.3"
-rrule = "0.5.5"
+rrule = "0.6.0"
 regex ="1"
 lazy_static = "1.4.0"
-directories = "3.0.1"
+directories = "4.0.1"
 dotenv = "0.15.0"
 maplit = "1.0.2"
 roxmltree = "0.14.0"
