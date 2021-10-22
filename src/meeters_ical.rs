@@ -653,11 +653,6 @@ pub fn parse_ical_timezones(
     calendar
         .timezones
         .iter()
-        // We filter out timezones called UTC since that is some outlook horseshit which is a timezone definition without an RRULE and a zero offset (really)
-        .filter(|vtimezone| {
-            find_property_value(&vtimezone.properties, "TZID").unwrap_or_else(|| "".to_string())
-                != "UTC"
-        })
         .map(|vtimezone| parse_ical_timezone(vtimezone))
         .collect()
 }
@@ -694,53 +689,73 @@ fn parse_occurrences_from_timespan(
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     let maybe_dtstart_prop = find_property(properties, "DTSTART");
     let maybe_rrule_prop = find_property(properties, "RRULE");
-    if maybe_dtstart_prop.is_none() || maybe_rrule_prop.is_none() {
+    if maybe_dtstart_prop.is_none() {
         return Err(CalendarError {
-            msg: "Invalid RRULE definition for timespan, missing DTSTART or RRULE".to_string(),
+            msg: "Invalid definition for timespan, missing DTSTART".to_string(),
         });
     }
-    let rule_props = vec![
-        maybe_rrule_prop.unwrap().clone(),
-        maybe_dtstart_prop.unwrap().clone(),
-    ];
-    // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
-    let event_as_string = properties_to_string(&rule_props);
-    let current_year = Local::now().year();
-    match event_as_string.parse::<RRuleSet>() {
-        // We only take occurrences in a short interval around the current year since we are
-        // only interested in current dates
-        // NOTE: could we ever run into the problem that a timezone has some historical
-        // transition way back into the past but no current ones? This could happen for
-        // a country deciding to dump daylight savings, right?
-        Ok(ruleset) => {
-            let relevant_transitions: Vec<DateTime<Tz>> = ruleset
-                .clone()
-                .into_iter()
-                .skip_while(|d| d.year() < (current_year - 2))
-                .take_while(|d| d.year() < (current_year + 2))
-                .collect();
-            if relevant_transitions.is_empty() {
-                // There could be a case where there are no transitions around our current year.
-                // For example for a country that dropped daylight savings at some point in the
-                // past. For this case we return simply the last 4 transitions coming right
-                // before the current year
-                let all_transitions_before_now: Vec<DateTime<Tz>> = ruleset
+    if maybe_rrule_prop.is_some() {
+        let rule_props = vec![
+            maybe_rrule_prop.unwrap().clone(),
+            maybe_dtstart_prop.unwrap().clone(),
+        ];
+        // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
+        let event_as_string = properties_to_string(&rule_props);
+        let current_year = Local::now().year();
+        match event_as_string.parse::<RRuleSet>() {
+            // We only take occurrences in a short interval around the current year since we are
+            // only interested in current dates
+            // NOTE: could we ever run into the problem that a timezone has some historical
+            // transition way back into the past but no current ones? This could happen for
+            // a country deciding to dump daylight savings, right?
+            Ok(ruleset) => {
+                let relevant_transitions: Vec<DateTime<Tz>> = ruleset
+                    .clone()
                     .into_iter()
-                    .take_while(|d| d.year() < current_year)
+                    .skip_while(|d| d.year() < (current_year - 2))
+                    .take_while(|d| d.year() < (current_year + 2))
                     .collect();
-                Ok(all_transitions_before_now
-                    .into_iter()
-                    .rev()
-                    .take(4)
-                    .rev()
-                    .collect())
-            } else {
-                Ok(relevant_transitions)
+                if relevant_transitions.is_empty() {
+                    // There could be a case where there are no transitions around our current year.
+                    // For example for a country that dropped daylight savings at some point in the
+                    // past. For this case we return simply the last 4 transitions coming right
+                    // before the current year
+                    let all_transitions_before_now: Vec<DateTime<Tz>> = ruleset
+                        .into_iter()
+                        .take_while(|d| d.year() < current_year)
+                        .collect();
+                    Ok(all_transitions_before_now
+                        .into_iter()
+                        .rev()
+                        .take(4)
+                        .rev()
+                        .collect())
+                } else {
+                    Ok(relevant_transitions)
+                }
             }
+            Err(e) => Err(CalendarError {
+                msg: format!("error in RRULE parsing: {}", e),
+            }),
         }
-        Err(e) => Err(CalendarError {
-            msg: format!("error in RRULE parsing: {}", e),
-        }),
+    } else {
+        // A timezone definition can also have no RRULE definition.
+        // In Exchange this will happen for UTC or other timezones that
+        // have no daylight savings. For example UTC-4, La Paz, Bolivia.
+        // According to the iCalendar spec this would also be possible
+        // for partial timezone definitions that are only valid within
+        // a certain period of time, but I am disregarding that use case for now.
+        // See also https://icalendar.org/iCalendar-RFC-5545/3-6-5-time-zone-component.html
+        let date_time_str = maybe_dtstart_prop.unwrap().value.as_ref().unwrap();
+        match NaiveDateTime::parse_from_str(date_time_str, "%Y%m%dT%H%M%S") {
+            Ok(dt) => return Ok(vec![LOCAL_TZ.from_local_datetime(&dt).unwrap()]),
+            Err(e) => Err(CalendarError {
+                msg: format!(
+                    "Could not parse DTSTART for timezone timespan with value {:?} and error: {:?}",
+                    date_time_str, e
+                ),
+            }),
+        }
     }
 }
 
@@ -793,7 +808,7 @@ fn parse_timespansets(vtimezone: &IcalTimeZone) -> Result<FixedTimespanSet, Cale
         first: FixedTimespan {
             utc_offset: 0,
             dst_offset: 0,
-            name: "FOOBAR",
+            name: "", // name is irrelevant here
         },
         rest: transition_points
             .iter()
@@ -803,7 +818,7 @@ fn parse_timespansets(vtimezone: &IcalTimeZone) -> Result<FixedTimespanSet, Cale
                     FixedTimespan {
                         utc_offset: transitions[transition_point.transition_index].offsetto,
                         dst_offset: 0,
-                        name: "FOO",
+                        name: "", // name is irrelevant here
                     },
                 )
             })
@@ -849,6 +864,7 @@ fn offset_to_seconds(offset: String) -> i32 {
     seconds
 }
 
+// Example custom timezone by Exchange for Western European Standard Time
 // BEGIN:VTIMEZONE
 //     TZID:W. Europe Standard Time
 //     BEGIN:STANDARD
@@ -864,6 +880,42 @@ fn offset_to_seconds(offset: String) -> i32 {
 //     RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3
 //     END:DAYLIGHT
 //     END:VTIMEZONE
+
+/// Example Timezone definition for La Paz Bolivia without daylight savings from Exchange
+/// Note the missing RRULE definition
+// BEGIN:VCALENDAR
+// METHOD:PUBLISH
+// PRODID:Microsoft Exchange Server 2010
+// VERSION:2.0
+// X-WR-CALNAME:Calendar
+// BEGIN:VTIMEZONE
+// TZID:(UTC-04:00) Georgetown\, La Paz\, Manaus\, San Juan
+// BEGIN:STANDARD
+// DTSTART:16010101T000000
+// TZOFFSETFROM:-0400
+// TZOFFSETTO:-0400
+// END:STANDARD
+// BEGIN:DAYLIGHT
+// DTSTART:16010101T000000
+// TZOFFSETFROM:-0400
+// TZOFFSETTO:-0400
+// END:DAYLIGHT
+// END:VTIMEZONE
+// BEGIN:VTIMEZONE
+// TZID:W. Europe Standard Time
+// BEGIN:STANDARD
+// DTSTART:16010101T030000
+// TZOFFSETFROM:+0200
+// TZOFFSETTO:+0100
+// RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10
+// END:STANDARD
+// BEGIN:DAYLIGHT
+// DTSTART:16010101T020000
+// TZOFFSETFROM:+0100
+// TZOFFSETTO:+0200
+// RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3
+// END:DAYLIGHT
+// END:VTIMEZONE
 
 #[cfg(test)]
 mod tests {
