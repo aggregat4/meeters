@@ -16,12 +16,12 @@ use domain::CalendarError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod binary_search;
-mod chrono_ical;
-mod chrono_windows_timezones;
 mod custom_timezone;
 mod domain;
 mod ical_util;
 mod meeters_ical;
+mod timezones;
+mod windows_timezones;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
     match ureq::get(url).call() {
@@ -273,9 +273,19 @@ enum CalendarMessages {
     EventNotification(Event),
 }
 
+fn default_tz(_: dotenv::Error) -> Result<String, dotenv::Error> {
+    Ok("Europe/Berlin".to_string())
+}
+
 fn main() -> std::io::Result<()> {
     load_config()?;
     // Parse config
+    let local_tz_iana: String = dotenv::var("MEETERS_LOCAL_TIMEZONE")
+        .or_else(default_tz)
+        .unwrap();
+    let local_tz: Tz = local_tz_iana
+        .parse()
+        .expect("Expecting to be able to parse the local timezone, instead got an error");
     let config_ical_url = dotenv::var("MEETERS_ICAL_URL")
         .expect("Expecting a configuration property with name MEETERS_ICAL_URL");
     let config_show_event_notification: bool = match dotenv::var("MEETERS_EVENT_NOTIFICATION") {
@@ -292,6 +302,7 @@ fn main() -> std::io::Result<()> {
         Ok(val) => val.parse::<i64>().expect("MEETERS_EVENT_WARNING_TIME_SECONDS must be a positive integer expressing the polling interval in seconds"),
         Err(_) => DEFAULT_EVENT_WARNING_TIME_SECONDS
     };
+    println!("Local Timezone configured as {}", local_tz_iana.clone());
     // magic incantation for gtk
     gtk::init().unwrap();
     // I can't get styles to work in appindicators
@@ -348,15 +359,17 @@ fn main() -> std::io::Result<()> {
                 || current_time - last_download_time > config_polling_interval_ms
             {
                 last_download_time = current_time;
-                match get_ical(&config_ical_url).and_then(|t| meeters_ical::extract_events(&t)) {
+                match get_ical(&config_ical_url)
+                    .and_then(|t| meeters_ical::extract_events(&t, &local_tz))
+                {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());
                         // let local_date = Local::now().date() - chrono::Duration::days(6);
                         let local_date = Local::now().date();
-                        let today_start = meeters_ical::LOCAL_TZ
+                        let today_start = local_tz
                             .ymd(local_date.year(), local_date.month(), local_date.day())
                             .and_hms(0, 0, 0);
-                        let today_end = meeters_ical::LOCAL_TZ
+                        let today_end = local_tz
                             .ymd(local_date.year(), local_date.month(), local_date.day())
                             .and_hms(23, 59, 59);
                         let today_events = get_events_for_interval(events, today_start, today_end);
