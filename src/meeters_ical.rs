@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn rrule_invalid_by_month_value() {
         // This used to fail with "invalid by_month value"
-        "DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20211205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12".parse::<RRuleSet>().unwrap();
+        "DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20221205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12".parse::<RRuleSet>().unwrap();
     }
 
     // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
