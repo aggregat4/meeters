@@ -323,8 +323,7 @@ fn parse_occurrences(
         let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
-                .all()
-                .iter()
+                .into_iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
@@ -334,7 +333,10 @@ fn parse_occurrences(
                 })
                 .collect()),
             Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
+                msg: format!(
+                    "error for string '{:?}' in RRULE parsing: {:?}",
+                    event_as_string, e
+                ),
             }),
         }
     } else if maybe_tzid_param.is_none() && !dtstart_time_str.ends_with('Z') {
@@ -349,14 +351,16 @@ fn parse_occurrences(
         let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
-                .all()
-                .iter()
+                .into_iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| dt.with_timezone(local_tz))
                 .collect()),
             Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
+                msg: format!(
+                    "error for string '{:?}' in RRULE parsing: {:?}",
+                    event_as_string, e
+                ),
             }),
         }
     } else if let Some(original_tz) = maybe_original_tz {
@@ -417,8 +421,7 @@ fn parse_occurrences(
         // println!("New RRULE string: {:?}", event_as_string);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
-                .all()
-                .iter()
+                .into_iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
@@ -452,7 +455,10 @@ fn parse_occurrences(
                 })
                 .collect()),
             Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
+                msg: format!(
+                    "error for string '{:?}' in RRULE parsing: {:?}",
+                    event_as_string, e
+                ),
             }),
         }
     } else {
@@ -657,18 +663,24 @@ mod tests {
     // https://github.com/fmeringdal/rust_rrule/issues/5
     #[test]
     fn rruleset_monthly_first_wednesday() {
-        println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap().all());
+        println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap());
     }
 
     #[test]
     fn rrule_all_fails_with_panic() {
-        "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap().all();
+        "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap();
     }
 
     #[test]
     fn rrule_all_missing_final_meeting() {
         //println!("{:?}", "DTSTART;TZID=W. Europe Standard Time:20210316T113000\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20210406T113000,20210504T11300\n0UID:040000008200E00074C5B7101A82E0080000000000EB5C2C7B0FD701000000000000000\n 010000000E4ADD290686A07499DF2A0FAB11D79E9".parse::<RRuleSet>().unwrap().all());
-        println!("{:?}", "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO".parse::<RRuleSet>().unwrap().all());
+        println!("{:?}", "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO".parse::<RRuleSet>().unwrap());
+    }
+
+    #[test]
+    fn rrule_invalid_by_month_value() {
+        // This used to fail with "invalid by_month value"
+        "DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20211205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12".parse::<RRuleSet>().unwrap();
     }
 
     // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
