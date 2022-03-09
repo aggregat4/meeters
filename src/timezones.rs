@@ -164,10 +164,7 @@ fn parse_occurrences_from_timespan(
                 }
             }
             Err(e) => Err(CalendarError {
-                msg: format!(
-                    "error for string '{:?}' in RRULE parsing: {:?}",
-                    event_as_string, e
-                ),
+                msg: format!("error in RRULE parsing: {}", e),
             }),
         }
     } else {

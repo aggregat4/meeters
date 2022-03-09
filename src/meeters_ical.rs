@@ -323,7 +323,8 @@ fn parse_occurrences(
         let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
-                .into_iter()
+                .all()
+                .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
@@ -333,10 +334,7 @@ fn parse_occurrences(
                 })
                 .collect()),
             Err(e) => Err(CalendarError {
-                msg: format!(
-                    "error for string '{:?}' in RRULE parsing: {:?}",
-                    event_as_string, e
-                ),
+                msg: format!("error in RRULE parsing: {}", e),
             }),
         }
     } else if maybe_tzid_param.is_none() && !dtstart_time_str.ends_with('Z') {
@@ -351,16 +349,14 @@ fn parse_occurrences(
         let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
-                .into_iter()
+                .all()
+                .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| dt.with_timezone(local_tz))
                 .collect()),
             Err(e) => Err(CalendarError {
-                msg: format!(
-                    "error for string '{:?}' in RRULE parsing: {:?}",
-                    event_as_string, e
-                ),
+                msg: format!("error in RRULE parsing: {}", e),
             }),
         }
     } else if let Some(original_tz) = maybe_original_tz {
@@ -421,7 +417,8 @@ fn parse_occurrences(
         // println!("New RRULE string: {:?}", event_as_string);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => Ok(ruleset
-                .into_iter()
+                .all()
+                .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
@@ -455,10 +452,7 @@ fn parse_occurrences(
                 })
                 .collect()),
             Err(e) => Err(CalendarError {
-                msg: format!(
-                    "error for string '{:?}' in RRULE parsing: {:?}",
-                    event_as_string, e
-                ),
+                msg: format!("error in RRULE parsing: {}", e),
             }),
         }
     } else {
@@ -663,12 +657,12 @@ mod tests {
     // https://github.com/fmeringdal/rust_rrule/issues/5
     #[test]
     fn rruleset_monthly_first_wednesday() {
-        println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap());
+        println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap().all());
     }
 
     #[test]
     fn rrule_all_fails_with_panic() {
-        "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap();
+        "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap().all();
     }
 
     #[test]
