@@ -116,12 +116,6 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
         (label.downcast::<gtk::Label>())
             .unwrap()
             .set_markup("<b>No Events Today</b>");
-        // let label = Label::new(None);
-        // label.set_markup("<b>No Events Today</b>");
-        // let item = gtk::MenuItem::new();
-        // // item.set_hexpand(true);
-        // item.set_halign(gtk::Align::Start);
-        // item.add(&label);
         m.append(&item);
     } else {
         for event in events {
@@ -177,6 +171,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     mi.connect_activate(|_| {
         gtk::main_quit();
     });
+    m.append(&gtk::SeparatorMenuItem::new());
     m.append(&mi);
     m.show_all();
     m
