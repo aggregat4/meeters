@@ -192,7 +192,7 @@ fn load_config() -> std::io::Result<()> {
             config_file.to_str().unwrap()
         );
     }
-    dotenv::from_path(config_file).expect("Can not load configuration file meeters_config.env");
+    dotenvy::from_path(config_file).expect("Can not load configuration file meeters_config.env");
     Ok(())
 }
 
@@ -268,32 +268,32 @@ enum CalendarMessages {
     EventNotification(Event),
 }
 
-fn default_tz(_: dotenv::Error) -> Result<String, dotenv::Error> {
+fn default_tz(_: dotenvy::Error) -> Result<String, dotenvy::Error> {
     Ok("Europe/Berlin".to_string())
 }
 
 fn main() -> std::io::Result<()> {
     load_config()?;
     // Parse config
-    let local_tz_iana: String = dotenv::var("MEETERS_LOCAL_TIMEZONE")
+    let local_tz_iana: String = dotenvy::var("MEETERS_LOCAL_TIMEZONE")
         .or_else(default_tz)
         .unwrap();
     let local_tz: Tz = local_tz_iana
         .parse()
         .expect("Expecting to be able to parse the local timezone, instead got an error");
-    let config_ical_url = dotenv::var("MEETERS_ICAL_URL")
+    let config_ical_url = dotenvy::var("MEETERS_ICAL_URL")
         .expect("Expecting a configuration property with name MEETERS_ICAL_URL");
-    let config_show_event_notification: bool = match dotenv::var("MEETERS_EVENT_NOTIFICATION") {
+    let config_show_event_notification: bool = match dotenvy::var("MEETERS_EVENT_NOTIFICATION") {
         Ok(val) => val.parse::<bool>().expect(
             "Value for MEETERS_EVENT_NOTIFICATION configuration parameter must be a boolean",
         ),
         Err(_) => true,
     };
-    let config_polling_interval_ms: u128 = match dotenv::var("MEETERS_POLLING_INTERVAL_MS") {
+    let config_polling_interval_ms: u128 = match dotenvy::var("MEETERS_POLLING_INTERVAL_MS") {
         Ok(val) => val.parse::<u128>().expect("MEETERS_POLLING_INTERVAL_MS must be a positive integer expressing the polling interval in milliseconds"),
         Err(_) => DEFAULT_POLLING_INTERVAL_MS
     };
-    let config_event_warning_time_seconds: i64 = match dotenv::var("MEETERS_EVENT_WARNING_TIME_SECONDS") {
+    let config_event_warning_time_seconds: i64 = match dotenvy::var("MEETERS_EVENT_WARNING_TIME_SECONDS") {
         Ok(val) => val.parse::<i64>().expect("MEETERS_EVENT_WARNING_TIME_SECONDS must be a positive integer expressing the polling interval in seconds"),
         Err(_) => DEFAULT_EVENT_WARNING_TIME_SECONDS
     };

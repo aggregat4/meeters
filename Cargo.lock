@@ -353,10 +353,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotenv"
-version = "0.15.0"
+name = "dotenvy"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
+checksum = "93781464167347fd349039f09a29c67bb40c092b0a5f01b03cb8a20a8b1995e9"
+dependencies = [
+ "dirs",
+]
 
 [[package]]
 name = "either"
@@ -885,7 +888,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "directories",
- "dotenv",
+ "dotenvy",
  "either",
  "glib",
  "gtk",
