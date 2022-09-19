@@ -102,7 +102,7 @@ fn create_indicator() -> AppIndicator {
 }
 
 fn open_meeting(meet_url: &str) {
-    match gtk::show_uri(None, meet_url, gtk::get_current_event_time()) {
+    match gtk::show_uri(None, meet_url, gtk::current_event_time()) {
         Ok(_) => (),
         Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
     }
@@ -112,7 +112,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     let m: Menu = gtk::Menu::new();
     if events.is_empty() {
         let item = gtk::MenuItem::with_label("test");
-        let label = item.get_child().unwrap();
+        let label = item.child().unwrap();
         (label.downcast::<gtk::Label>())
             .unwrap()
             .set_markup("<b>No Events Today</b>");
@@ -142,7 +142,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             // to have text that was only selectable/highlighted until the end of the text but not
             // the end of the menu item
             let item = gtk::MenuItem::with_label("Test");
-            let label = item.get_child().unwrap().downcast::<gtk::Label>().unwrap();
+            let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
             // we used to format this text with markup and uset set_markup but that causes potential
             // escaping issues and we just default to plain text now
             let now = Local::now();
