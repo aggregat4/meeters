@@ -265,7 +265,7 @@ struct TransitionPoint {
 
 struct TimezoneTransition {
     properties: Vec<Property>,
-    offsetfrom: i32,
+    _offsetfrom: i32,
     offsetto: i32,
 }
 
@@ -274,7 +274,7 @@ fn parse_icaltimezonetransition(
 ) -> Result<TimezoneTransition, CalendarError> {
     Ok(TimezoneTransition {
         properties: transition.properties.to_owned(),
-        offsetfrom: offset_to_seconds(
+        _offsetfrom: offset_to_seconds(
             find_property_value(&transition.properties, "TZOFFSETFROM").ok_or(CalendarError {
                 msg: "no TZOFFSETFROM in timezone transition".to_string(),
             })?,
