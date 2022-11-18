@@ -154,7 +154,7 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             } else if now >= event.start_timestamp && now <= event.end_timestamp {
                 format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
             } else {
-                format!("✓  {}: {}{}", time_string, &event.summary, meeturl_string)
+                format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
             };
 
             label.set_text(&label_string);
