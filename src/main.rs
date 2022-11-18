@@ -13,7 +13,7 @@ use notify_rust::Notification;
 use crate::domain::Event;
 use crate::CalendarMessages::{EventNotification, TodayEvents};
 use domain::CalendarError;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod binary_search;
 mod custom_timezone;
@@ -24,7 +24,8 @@ mod timezones;
 mod windows_timezones;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
-    match ureq::get(url).call() {
+    println!("trying to fetch ical");
+    match ureq::get(url).timeout(Duration::new(10, 0)).call() {
         Ok(response) => match response.into_string() {
             Ok(body) => Ok(body),
             Err(e) => Err(CalendarError {
