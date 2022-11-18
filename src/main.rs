@@ -68,14 +68,38 @@ fn set_error_icon(indicator: &mut AppIndicator) {
     }
 }
 
-fn set_success_icon(indicator: &mut libappindicator::AppIndicator) {
+fn set_some_meetings_left_icon(indicator: &mut libappindicator::AppIndicator) {
     if let Some(icon_path) = find_icon_path() {
         indicator.set_icon(
-            icon_path
-                .with_file_name("meeters-appindicator.png")
-                .to_str()
-                .unwrap(),
+            get_icon_path_with_fallbak(
+                icon_path,
+                "meeters-appindicator-somemeetingsleft.png".to_string(),
+            )
+            .to_str()
+            .unwrap(),
         );
+    }
+}
+
+fn set_no_meetings_left_icon(indicator: &mut libappindicator::AppIndicator) {
+    if let Some(icon_path) = find_icon_path() {
+        indicator.set_icon(
+            get_icon_path_with_fallbak(
+                icon_path,
+                "meeters-appindicator-nomeetingsleft.png".to_string(),
+            )
+            .to_str()
+            .unwrap(),
+        );
+    }
+}
+
+fn get_icon_path_with_fallbak(icon_path: PathBuf, icon_filename: String) -> PathBuf {
+    let nomeetingsleft_icon_path = icon_path.with_file_name(icon_filename);
+    if !nomeetingsleft_icon_path.exists() {
+        return icon_path.with_file_name("meeters-appindicator.png");
+    } else {
+        return nomeetingsleft_icon_path;
     }
 }
 
@@ -109,8 +133,9 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
-fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
-    let m: Menu = gtk::Menu::new();
+fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator) {
+    let mut m: Menu = gtk::Menu::new();
+    let mut nof_upcoming_meetings = 0;
     if events.is_empty() {
         let item = gtk::MenuItem::with_label("test");
         let label = item.child().unwrap();
@@ -150,8 +175,10 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
             let label_string = if all_day {
                 format!("{}: {}{}", time_string, &event.summary, meeturl_string)
             } else if now < event.start_timestamp {
+                nof_upcoming_meetings += 1;
                 format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
             } else if now >= event.start_timestamp && now <= event.end_timestamp {
+                nof_upcoming_meetings += 1;
                 format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
             } else {
                 format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
@@ -175,7 +202,14 @@ fn create_indicator_menu(events: &[domain::Event]) -> gtk::Menu {
     m.append(&gtk::SeparatorMenuItem::new());
     m.append(&mi);
     m.show_all();
-    m
+    if nof_upcoming_meetings > 0 {
+        println!("some meetings upcoming");
+        set_some_meetings_left_icon(indicator);
+    } else {
+        println!("NO meetings upcoming");
+        set_no_meetings_left_icon(indicator);
+    }
+    indicator.set_menu(&mut m);
 }
 
 fn get_config_directory() -> PathBuf {
@@ -313,8 +347,8 @@ fn main() -> std::io::Result<()> {
     // );
     // set up our widgets
     let mut indicator = create_indicator();
-    let mut menu = create_indicator_menu(&[]);
-    indicator.set_menu(&mut menu);
+    create_indicator_menu(&[], &mut indicator);
+
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     // let (status_sender, status_receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
     let (events_sender, events_receiver) =
@@ -322,12 +356,10 @@ fn main() -> std::io::Result<()> {
     events_receiver.attach(None, move |event_result| {
         match event_result {
             Ok(TodayEvents(events)) => {
-                set_success_icon(&mut indicator);
-                // TODO: update the menu to reflect all the events or that we have no events
                 if events.is_empty() {
-                    indicator.set_menu(&mut create_indicator_menu(&[]));
+                    create_indicator_menu(&[], &mut indicator);
                 } else {
-                    indicator.set_menu(&mut create_indicator_menu(&events));
+                    create_indicator_menu(&events, &mut indicator);
                 }
             }
             Ok(EventNotification(event)) => {
