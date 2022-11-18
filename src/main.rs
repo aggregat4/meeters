@@ -286,8 +286,9 @@ fn show_event_notification(event: Event) {
                 }
             });
     } else {
-        // TODO: ignores error
-        notification.show();
+        if let Err(_) = notification.show() {
+            println!("Could not show notification");
+        }
     }
 }
 
