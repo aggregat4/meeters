@@ -1,3 +1,7 @@
+- add an icon state for no events
+- reflect ical fetching error in error state in icon
+- investigate adding secrets support for basic authenticated URLs
+
 ## Add optional support for opening zoom meeting directly in zoom
 
 Some experiments show that zoom still supports the "zoommgt" links.
