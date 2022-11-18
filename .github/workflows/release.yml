@@ -23,7 +23,7 @@ jobs:
         run: |
           cargo build --release
           cp assets/* target/release/
-          tar -zcf meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz -C target/release meeters *.png
+          tar -zcf meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz -C target/release meeters meeters-appindicator.png meeters-appindicator-error.png meeters-appindicator-nomeetingsleft.png meeters-appindicator-somemeetingsleft.png
       - name: Upload the artifacts
         uses: skx/github-action-publish-binaries@master
         env:
