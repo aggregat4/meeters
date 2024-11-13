@@ -4,6 +4,7 @@ use crate::custom_timezone::FixedTimespanSet;
 use crate::ical_util::find_property;
 use crate::ical_util::find_property_value;
 use crate::ical_util::properties_to_string;
+use crate::ical_util::unescape_string;
 use crate::CalendarError;
 use chrono::prelude::*;
 use chrono::DateTime;
@@ -50,6 +51,7 @@ pub fn parse_tzid<'a>(
     tzid: &str,
     custom_timezones: &'a HashMap<String, CustomTz>,
 ) -> Result<Either<Tz, &'a CustomTz>, String> {
+    //println!("Parsing tzid: {}", tzid);
     match custom_timezones.get(tzid) {
         Some(tz) => Ok(Right(tz)),
         None => Ok(Left(parse_standard_tz(tzid)?)),
@@ -91,8 +93,10 @@ fn parse_ical_timezone(
 ) -> Result<(String, CustomTz), CalendarError> {
     match find_property_value(&vtimezone.properties, "TZID") {
         Some(name) => {
+            // All string values in the icalendar are escaped so we need to unescape them
+            let unescaped_name = unescape_string(&name.to_string());
             let timezone = CustomTz {
-                name: name.to_string(),
+                name: unescaped_name.clone(),
                 timespanset: parse_timespansets(vtimezone, local_tz)?, // pass on the error
             };
             println!(
@@ -100,7 +104,7 @@ fn parse_ical_timezone(
                 timezone.name,
                 timezone.timespanset.rest.len()
             );
-            Ok((name, timezone))
+            Ok((unescaped_name, timezone))
         }
         None => Err(CalendarError {
             msg: "Expecting TZID property for custom timezone".to_string(),

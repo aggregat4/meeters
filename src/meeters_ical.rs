@@ -1,4 +1,5 @@
 use crate::custom_timezone::CustomTz;
+use crate::ical_util::unescape_string;
 use crate::timezones::parse_ical_timezones;
 use crate::timezones::parse_tzid;
 use chrono::prelude::*;
@@ -70,9 +71,9 @@ fn extract_ical_datetime(
     if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // We are assuming there is only one value in the TZID param
-        let tzid = &find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0];
+        let tzid = unescape_string(&find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0]);
         // println!("We have a TZID: {}", tzid);
-        match parse_tzid(tzid, calendar_timezones) {
+        match parse_tzid(&tzid, calendar_timezones) {
             Ok(timezone) => parse_ical_datetime(date_time_str, &timezone, local_tz),
             // in case we can't parse the timezone ID we just default to local, also not optimal
             Err(_) => {
@@ -183,29 +184,20 @@ fn parse_zoom_url(text: &str) -> Option<String> {
         .map(|mat| mat.as_str().to_string())
 }
 
-fn sanitise_string(input: &str) -> String {
-    input
-        .replace("\\n", "\n")
-        .replace("\\r", "\r")
-        .replace("\\t", "\t")
-        .replace("\\,", ",")
-        .replace("\\'", "'")
-}
-
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1
 fn parse_event(
     ical_event: &IcalEvent,
     calendar_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
 ) -> Result<Event, CalendarError> {
-    let summary = sanitise_string(
+    let summary = unescape_string(
         &find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string()),
     );
-    let description = sanitise_string(
+    let description = unescape_string(
         &find_property_value(&ical_event.properties, "DESCRIPTION")
             .unwrap_or_else(|| "".to_string()),
     );
-    let location = sanitise_string(
+    let location = unescape_string(
         &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_else(|| "".to_string()),
     );
     // println!("Parsing event '{}'", summary);
@@ -288,7 +280,8 @@ fn parse_occurrences(
         .as_ref()
         .and_then(|params| find_param(params, "TZID"));
     let maybe_original_tz = if let Some(tzid_param) = maybe_tzid_param {
-        match parse_tzid(&tzid_param[0], custom_timezones) {
+        let unescaped_tzid = unescape_string(&tzid_param[0]);
+        match parse_tzid(&unescaped_tzid, custom_timezones) {
             Ok(original_tz) => Some(original_tz),
             Err(e) => {
                 return Err(CalendarError {
@@ -600,6 +593,7 @@ pub fn extract_events(text: &str, local_tz: &Tz) -> Result<Vec<Event>, CalendarE
     match parse_calendar(text)? {
         Some(calendar) => {
             let calendar_timezones = parse_ical_timezones(&calendar, local_tz)?;
+            //println!("Calendar timezones found: {:?}", calendar_timezones);
             let event_tuples = parse_events(calendar, &calendar_timezones, local_tz)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out

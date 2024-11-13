@@ -88,6 +88,15 @@ pub fn ical_event_to_string(event: &IcalEvent) -> String {
     properties_to_string(&event.properties)
 }
 
+pub fn unescape_string(input: &str) -> String {
+    input
+        .replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\,", ",")
+        .replace("\\'", "'")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
