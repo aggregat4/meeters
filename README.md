@@ -30,3 +30,13 @@ The following properties are supported:
 | MEETERS_EVENT_NOTIFICATION | no | true | Whether or not an upcoming event should be announced with a sticky notification ("true" or "false") | 
 | MEETERS_POLLING_INTERVAL_MS | no | 120000 | The time in milliseconds between two fetches of the ical calendar. |
 | MEETERS_EVENT_WARNING_TIME_SECONDS | no | 60 | The time in seconds before the next meeting to show the notification. |
+
+# Troubleshooting
+
+## `thread 'main' panicked at 'Failed to load ayatana-appindicator3 or appindicator3 dynamic library`
+
+If you get an error regarding a missing appindicator library, you need to install it first. On Arch Linux this is done with:
+
+```
+sudo pacman -S libappindicator-gtk3
+```
