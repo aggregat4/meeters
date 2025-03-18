@@ -355,6 +355,18 @@ impl WindowManager {
         }
     }
 
+    fn toggle_window(&mut self) {
+        if let Some(window) = &self.current_window {
+            if window.is_visible() {
+                window.hide();
+            } else {
+                window.present();
+            }
+        } else {
+            self.show_window();
+        }
+    }
+
     fn show_window(&mut self) {
         let events = self.events.lock().unwrap();
         
@@ -609,6 +621,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let iface_token = {
         let show_sender = dbus_sender.clone();
         let close_sender = dbus_sender.clone();
+        let toggle_sender = dbus_sender.clone();
         
         cr.register("net.aggregat4.Meeters", move |b| {
             let show_sender = show_sender.clone();
@@ -620,6 +633,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let close_sender = close_sender.clone();
             b.method("CloseWindow", (), (), move |_, _, ()| {
                 close_sender.send(("close", ())).unwrap();
+                Ok(())
+            });
+
+            let toggle_sender = toggle_sender.clone();
+            b.method("ToggleWindow", (), (), move |_, _, ()| {
+                toggle_sender.send(("toggle", ())).unwrap();
                 Ok(())
             });
         })
@@ -638,6 +657,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     window.hide();
                 }
             },
+            "toggle" => wm.toggle_window(),
             _ => (),
         }
         glib::Continue(true)
