@@ -9,6 +9,7 @@ use gtk::prelude::*;
 use gtk::Menu;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 use notify_rust::Notification;
+use ureq::Agent;
 // use gtk::DrawingArea;  // Unused import
 // use gtk::cairo;        // Unused import
 
@@ -32,17 +33,20 @@ use std::sync::Mutex;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
     println!("trying to fetch ical");
-    match ureq::get(url).timeout(Duration::new(10, 0)).call() {
-        Ok(response) => match response.into_string() {
-            Ok(body) => Ok(body),
-            Err(e) => Err(CalendarError {
-                msg: format!("Error getting calendar response body as text: {}", e),
-            }),
-        },
-        Err(e) => Err(CalendarError {
-            msg: format!("Error getting ical from url: {}", e),
-        }),
-    }
+    let config = Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(5)))
+        .build();
+    let agent: Agent = config.into();
+    return agent.get(url)
+        .call()
+        .map_err(|e| CalendarError {
+            msg: format!("Error calling calendar URL: {}", e)
+        })?
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| CalendarError {
+            msg: format!("Error reading calendar response body: {}", e)
+        });
 }
 
 fn has_icons(dir: &Path) -> bool {
