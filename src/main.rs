@@ -152,8 +152,8 @@ impl TimelineView {
         let start_hour = 7;
         let end_hour = 20;
         let total_hours = end_hour - start_hour;
-        let base_height = 30; // Base height for 15-minute blocks
-        let min_height = 20;  // Minimum height for very short meetings
+        let base_height = 20; // Base height for 15-minute blocks (reduced from 30)
+        let min_height = 15;  // Minimum height for very short meetings (reduced from 20)
         let button_width = 330; // Total width available for buttons
 
         // Create a fixed container for absolute positioning
@@ -261,13 +261,13 @@ impl TimelineView {
                     event_start.format("%H:%M"),
                     event_end.format("%H:%M")
                 );
-                let label = gtk::Label::new(Some(&format!("{}\n{}", time_str, event.summary)));
+                let label = gtk::Label::new(Some(&format!("{} - {}", time_str, event.summary)));
                 label.set_line_wrap(true);
                 label.set_xalign(0.0);
                 label.set_margin_start(4);
                 label.set_margin_end(4);
-                label.set_margin_top(4);
-                label.set_margin_bottom(4);
+                label.set_margin_top(2);
+                label.set_margin_bottom(2);
                 button.add(&label);
 
                 // Add click handler for meetings with URLs
