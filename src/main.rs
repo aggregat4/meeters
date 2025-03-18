@@ -178,7 +178,7 @@ impl TimelineView {
 
             // Hour separator with styling
             let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            separator.set_size_request(800, -1); // Make sure it spans the full width
+            separator.set_size_request(600, -1); // Explicit width, slightly less than window width
             let style_context = separator.style_context();
             
             // Different styles for start/end of day vs regular hours
@@ -204,7 +204,7 @@ impl TimelineView {
             let y_position = (minutes_from_start * hour_height) / 60;
             
             let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            current_time_marker.set_size_request(800, -1); // Make sure it spans the full width
+            current_time_marker.set_size_request(600, -1); // Match separator width
             let style_context = current_time_marker.style_context();
             let provider = gtk::CssProvider::new();
             provider
@@ -284,12 +284,11 @@ impl TimelineView {
 
                 // Add event text
                 let time_str = format!(
-                    "{} - {} ({}m)",
+                    "{} - {}",
                     event_start.format("%H:%M"),
-                    event_end.format("%H:%M"),
-                    duration_minutes
+                    event_end.format("%H:%M")
                 );
-                let label = gtk::Label::new(Some(&format!("{} - {}", time_str, event.summary)));
+                let label = gtk::Label::new(Some(&format!("{}  {}", time_str, event.summary)));
                 label.set_line_wrap(true);
                 label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
                 label.set_justify(gtk::Justification::Left);
@@ -316,8 +315,8 @@ impl TimelineView {
         layout_box.pack_start(&time_column, false, false, 0);
         layout_box.pack_start(&meeting_area, true, true, 0);
 
-        // Set a minimum height for the layout
-        let total_height = (end_hour - start_hour + 1) * hour_height;
+        // Set a minimum height for the layout - no need for +1 as we want to end exactly at end_hour
+        let total_height = (end_hour - start_hour) * hour_height;
         layout_box.set_size_request(-1, total_height);
 
         // Add to scrolled window
@@ -334,18 +333,18 @@ fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
     // Constants for calculating window size
     let start_hour = 7;
     let end_hour = 20;
-    let base_height = 20;
-    let window_height = (end_hour - start_hour + 1) * base_height * 4 + 50; // Add padding for decorations
+    let hour_height = 60;  // Match the hour_height from TimelineView
+    let window_height = (end_hour - start_hour) * hour_height + 100; // Add padding for decorations
 
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     window.set_title("Today's Meetings");
-    window.set_default_size(800, window_height);
+    window.set_default_size(700, window_height);
 
     let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    main_box.set_margin_start(12);
-    main_box.set_margin_end(12);
-    main_box.set_margin_top(12);
-    main_box.set_margin_bottom(12);
+    main_box.set_margin_start(6);
+    main_box.set_margin_end(6);
+    main_box.set_margin_top(6);
+    main_box.set_margin_bottom(6);
 
     // Add timeline view
     let timeline = TimelineView::new(events.to_vec());
