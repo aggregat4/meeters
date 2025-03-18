@@ -178,14 +178,14 @@ impl TimelineView {
 
             // Hour separator with styling
             let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            separator.set_hexpand(true);
+            separator.set_size_request(800, -1); // Make sure it spans the full width
             let style_context = separator.style_context();
             
             // Different styles for start/end of day vs regular hours
             let css = if hour == start_hour || hour == end_hour {
-                "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; }"
+                "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; margin: 0; padding: 0; }"
             } else {
-                "box { background-color: rgba(200, 200, 200, 0.15); min-height: 1px; }"
+                "box { background-color: rgba(200, 200, 200, 0.3); min-height: 1px; margin: 0; padding: 0; }"
             };
             
             let provider = gtk::CssProvider::new();
@@ -204,11 +204,12 @@ impl TimelineView {
             let y_position = (minutes_from_start * hour_height) / 60;
             
             let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            current_time_marker.set_hexpand(true);
+            current_time_marker.set_size_request(800, -1); // Make sure it spans the full width
             let style_context = current_time_marker.style_context();
-            let css = "box { background-color: rgba(255, 0, 0, 0.5); min-height: 2px; }";
             let provider = gtk::CssProvider::new();
-            provider.load_from_data(css.as_bytes()).unwrap();
+            provider
+                .load_from_data(b"box { background-color: rgba(255, 0, 0, 0.6); min-height: 2px; margin: 0; padding: 0; }")
+                .unwrap();
             style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
             
             meeting_area.put(&current_time_marker, 0, y_position);
