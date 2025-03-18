@@ -9,8 +9,8 @@ use gtk::prelude::*;
 use gtk::Menu;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 use notify_rust::Notification;
-use gtk::DrawingArea;
-use gtk::cairo;
+// use gtk::DrawingArea;  // Unused import
+// use gtk::cairo;        // Unused import
 
 use crate::domain::Event;
 use crate::CalendarMessages::{EventNotification, TodayEvents};
@@ -148,40 +148,79 @@ impl TimelineView {
         container.set_margin_top(12);
         container.set_margin_bottom(12);
 
-        // Constants for business hours
-        let start_hour = 7;
-        let end_hour = 20;
-        let total_hours = end_hour - start_hour;
-        let base_height = 20; // Base height for 15-minute blocks (reduced from 30)
-        let min_height = 15;  // Minimum height for very short meetings (reduced from 20)
-        let button_width = 330; // Total width available for buttons
+        // Constants for layout
+        let start_hour: i32 = 7;  // 7 AM
+        let end_hour: i32 = 20;   // 8 PM
+        let hour_height: i32 = 60;  // Height for one hour
+        let time_label_width: i32 = 50;
+        let spacing: i32 = 10;
 
-        // Create a fixed container for absolute positioning
-        let fixed = gtk::Fixed::new();
-        fixed.set_size_request(350, (end_hour - start_hour + 1) * base_height * 4);
+        // Create the main layout container
+        let layout_box = gtk::Box::new(gtk::Orientation::Horizontal, spacing);
+        layout_box.set_hexpand(true);
 
-        // Add hour markers
+        // Time labels column and meeting area (both using Fixed for exact positioning)
+        let time_column = gtk::Fixed::new();
+        time_column.set_size_request(time_label_width, -1);
+        
+        let meeting_area = gtk::Fixed::new();
+        meeting_area.set_hexpand(true);
+
+        // Add hour markers and grid lines
         for hour in start_hour..=end_hour {
-            let hour_label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
-            hour_label.set_width_chars(5);
-            hour_label.set_xalign(0.0);
-            fixed.put(&hour_label, 0, ((hour - start_hour) * base_height * 4) as i32);
+            let y_position = (hour - start_hour) * hour_height;
+            
+            // Hour label
+            let label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
+            label.set_xalign(1.0);
+            label.set_margin_end(5);
+            time_column.put(&label, 0, y_position);
 
-            // Add a subtle line for this hour
-            let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
-            separator.set_size_request(button_width, 1);
-            fixed.put(&separator, 40, ((hour - start_hour) * base_height * 4) as i32);
+            // Hour separator with styling
+            let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            separator.set_hexpand(true);
+            let style_context = separator.style_context();
+            
+            // Different styles for start/end of day vs regular hours
+            let css = if hour == start_hour || hour == end_hour {
+                "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; }"
+            } else {
+                "box { background-color: rgba(200, 200, 200, 0.15); min-height: 1px; }"
+            };
+            
+            let provider = gtk::CssProvider::new();
+            provider.load_from_data(css.as_bytes()).unwrap();
+            style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            
+            meeting_area.put(&separator, 0, y_position);
         }
 
-        // First, group overlapping events
+        // Current time indicator
+        let now = Local::now();
+        let current_hour = now.hour() as i32;
+        let current_minute = now.minute() as i32;
+        if current_hour >= start_hour && current_hour <= end_hour {
+            let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
+            let y_position = (minutes_from_start * hour_height) / 60;
+            
+            let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            current_time_marker.set_hexpand(true);
+            let style_context = current_time_marker.style_context();
+            let css = "box { background-color: rgba(255, 0, 0, 0.5); min-height: 2px; }";
+            let provider = gtk::CssProvider::new();
+            provider.load_from_data(css.as_bytes()).unwrap();
+            style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            
+            meeting_area.put(&current_time_marker, 0, y_position);
+        }
+
+        // Group overlapping events
         let mut event_groups: Vec<Vec<&Event>> = Vec::new();
-        
         for event in &events {
             if event.start_timestamp.time() == event.end_timestamp.time() {
                 continue; // Skip all-day events
             }
 
-            // Find a group where this event overlaps with any existing event
             let mut found_group = false;
             for group in &mut event_groups {
                 let overlaps = group.iter().any(|existing| {
@@ -197,80 +236,70 @@ impl TimelineView {
             }
             
             if !found_group {
-                // Create a new group with just this event
                 event_groups.push(vec![event]);
             }
         }
 
-        // Now process each group
+        // Render event groups
         for group in event_groups {
             let group_size = group.len() as i32;
-            let individual_width = if group_size > 1 {
-                (button_width - 10 * (group_size - 1)) / group_size
-            } else {
-                button_width
-            };
+            let available_width = 600; // Will be adjusted based on actual width
+            let button_width = ((available_width - (spacing * (group_size + 1))) / group_size).max(200);
 
             for (index, event) in group.iter().enumerate() {
                 let event_start = event.start_timestamp.with_timezone(&Local);
                 let event_end = event.end_timestamp.with_timezone(&Local);
                 
-                // Calculate position and size
-                let start_hour = event_start.hour() as i32;
-                let start_minute = event_start.minute() as i32;
-                let duration = event_end.signed_duration_since(event_start);
-                let duration_minutes = duration.num_minutes() as i32;
-
-                // Calculate y position and height
-                let minutes_from_start = ((start_hour - 7) * 60 + start_minute) as i32;  // 7 is start_hour
-                let y_position = (minutes_from_start * base_height) / 15;
-                let height = (duration_minutes * base_height) / 15;
+                // Calculate position
+                let start_minutes = (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
+                let duration_minutes = event_end.signed_duration_since(event_start).num_minutes() as i32;
+                
+                let y_position = (start_minutes * hour_height) / 60;
+                let height = (duration_minutes * hour_height) / 60;
+                let x_position = spacing + (button_width + spacing) * index as i32;
 
                 // Create event button
                 let button = gtk::Button::new();
-                button.set_size_request(individual_width, height.max(min_height));
+                button.set_size_request(button_width, height.max(30));
 
-                // Style the button based on event status
+                // Style based on event status
                 let now = Local::now();
-                let (r, g, b) = if now >= event.start_timestamp && now <= event.end_timestamp {
-                    (0.4, 0.6, 0.9) // Current meeting - blue
+                let style_context = button.style_context();
+                let color = if now >= event.start_timestamp && now <= event.end_timestamp {
+                    "rgba(100, 150, 255, 0.9)"  // Current - blue
                 } else if now < event.start_timestamp {
-                    (0.6, 0.8, 0.6) // Upcoming - light green
+                    "rgba(150, 200, 150, 0.9)"  // Upcoming - green
                 } else {
-                    (0.9, 0.9, 0.9) // Past - light gray
+                    "rgba(220, 220, 220, 0.9)"  // Past - gray
                 };
 
-                // Create a colored background
-                let style_context = button.style_context();
                 let css = format!(
-                    "button {{ background-color: rgb({}, {}, {}); border-radius: 4px; }}",
-                    (r * 255.0) as u8,
-                    (g * 255.0) as u8,
-                    (b * 255.0) as u8
+                    "button {{ background: {}; border-radius: 4px; }}",
+                    color
                 );
                 let provider = gtk::CssProvider::new();
                 provider.load_from_data(css.as_bytes()).unwrap();
-                style_context.add_provider(
-                    &provider,
-                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-                );
+                style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
-                // Add event text with time
+                // Add event text
                 let time_str = format!(
-                    "{} - {}",
+                    "{} - {} ({}m)",
                     event_start.format("%H:%M"),
-                    event_end.format("%H:%M")
+                    event_end.format("%H:%M"),
+                    duration_minutes
                 );
                 let label = gtk::Label::new(Some(&format!("{} - {}", time_str, event.summary)));
                 label.set_line_wrap(true);
+                label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+                label.set_justify(gtk::Justification::Left);
                 label.set_xalign(0.0);
-                label.set_margin_start(4);
-                label.set_margin_end(4);
-                label.set_margin_top(2);
-                label.set_margin_bottom(2);
+                label.set_margin_start(8);
+                label.set_margin_end(8);
+                label.set_margin_top(4);
+                label.set_margin_bottom(4);
                 button.add(&label);
 
-                // Add click handler for meetings with URLs
+                // Add click handler
                 if let Some(meet_url) = &event.meeturl {
                     let url = meet_url.clone();
                     button.connect_clicked(move |_| {
@@ -278,15 +307,22 @@ impl TimelineView {
                     });
                 }
 
-                // Position the button with offset for overlapping events
-                let x_position = 40 + (individual_width + 10) * index as i32;
-                fixed.put(&button, x_position, y_position);
+                meeting_area.put(&button, x_position, y_position);
             }
         }
 
-        // Add the fixed container to a scrolled window
+        // Assemble the layout
+        layout_box.pack_start(&time_column, false, false, 0);
+        layout_box.pack_start(&meeting_area, true, true, 0);
+
+        // Set a minimum height for the layout
+        let total_height = (end_hour - start_hour + 1) * hour_height;
+        layout_box.set_size_request(-1, total_height);
+
+        // Add to scrolled window
         let scrolled_window = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-        scrolled_window.add(&fixed);
+        scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+        scrolled_window.add(&layout_box);
         container.pack_start(&scrolled_window, true, true, 0);
 
         Self { container, events }
@@ -302,7 +338,7 @@ fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
 
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     window.set_title("Today's Meetings");
-    window.set_default_size(500, window_height);
+    window.set_default_size(800, window_height);
 
     let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
     main_box.set_margin_start(12);
