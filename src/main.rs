@@ -294,9 +294,15 @@ impl TimelineView {
 }
 
 fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
+    // Constants for calculating window size
+    let start_hour = 7;
+    let end_hour = 20;
+    let base_height = 20;
+    let window_height = (end_hour - start_hour + 1) * base_height * 4 + 50; // Add padding for decorations
+
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     window.set_title("Today's Meetings");
-    window.set_default_size(400, 800);
+    window.set_default_size(500, window_height);
 
     let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
     main_box.set_margin_start(12);
