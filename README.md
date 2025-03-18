@@ -40,3 +40,30 @@ If you get an error regarding a missing appindicator library, you need to instal
 ```
 sudo pacman -S libappindicator-gtk3
 ```
+
+# D-Bus Interface
+
+meeters exposes a D-Bus interface that allows you to control the window state programmatically. The service name is `net.aggregat4.Meeters` and the object path is `/net/aggregat4/Meeters`.
+
+## Available Commands
+
+### ShowWindow
+Opens the meetings window if it's closed or creates it if it doesn't exist.
+
+```bash
+dbus-send --session --dest=net.aggregat4.Meeters --type=method_call /net/aggregat4/Meeters net.aggregat4.Meeters.ShowWindow
+```
+
+### CloseWindow
+Hides the meetings window if it's open.
+
+```bash
+dbus-send --session --dest=net.aggregat4.Meeters --type=method_call /net/aggregat4/Meeters net.aggregat4.Meeters.CloseWindow
+```
+
+### ToggleWindow
+Toggles the window state - opens it if it's closed or closes it if it's open.
+
+```bash
+dbus-send --session --dest=net.aggregat4.Meeters --type=method_call /net/aggregat4/Meeters net.aggregat4.Meeters.ToggleWindow
+```
