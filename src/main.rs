@@ -133,6 +133,72 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
+fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    window.set_title("Today's Meetings");
+    window.set_default_size(400, 300);
+
+    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    vbox.set_margin_start(12);
+    vbox.set_margin_end(12);
+    vbox.set_margin_top(12);
+    vbox.set_margin_bottom(12);
+
+    if events.is_empty() {
+        let label = gtk::Label::new(Some("<b>No Events Today</b>"));
+        label.set_use_markup(true);
+        vbox.pack_start(&label, false, false, 0);
+    } else {
+        for event in events {
+            let event_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            
+            let time_label = if event.start_timestamp.time() == event.end_timestamp.time() {
+                gtk::Label::new(Some("All Day"))
+            } else {
+                gtk::Label::new(Some(&format!(
+                    "{} - {}",
+                    event.start_timestamp.format("%H:%M"),
+                    event.end_timestamp.format("%H:%M")
+                )))
+            };
+            time_label.set_width_chars(12);
+            time_label.set_xalign(0.0);
+            
+            let summary_label = gtk::Label::new(Some(&event.summary));
+            summary_label.set_xalign(0.0);
+            summary_label.set_hexpand(true);
+            
+            let status_label = if Local::now() < event.start_timestamp {
+                gtk::Label::new(Some("◦"))
+            } else if Local::now() >= event.start_timestamp && Local::now() <= event.end_timestamp {
+                gtk::Label::new(Some("•"))
+            } else {
+                gtk::Label::new(Some("✓"))
+            };
+            status_label.set_width_chars(2);
+            
+            event_box.pack_start(&time_label, false, false, 0);
+            event_box.pack_start(&summary_label, true, true, 0);
+            event_box.pack_start(&status_label, false, false, 0);
+            
+            if let Some(meet_url) = &event.meeturl {
+                let join_button = gtk::Button::with_label("Join");
+                let meet_url_clone = meet_url.clone();
+                join_button.connect_clicked(move |_| {
+                    open_meeting(&meet_url_clone);
+                });
+                event_box.pack_start(&join_button, false, false, 0);
+            }
+            
+            vbox.pack_start(&event_box, false, false, 0);
+        }
+    }
+
+    window.add(&vbox);
+    window.show_all();
+    window
+}
+
 fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator) {
     let mut m: Menu = gtk::Menu::new();
     let mut nof_upcoming_meetings = 0;
@@ -161,16 +227,8 @@ fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator)
                 None => "",
             };
 
-            // We need to actually create a menu item with a dummy label, then get that child
-            // element, cast it to an actual label and then modify its markup to make sure we get
-            // menu items that are left aligned but expand to fill horizontal space
-            // The first attempt to create an empty item and then add a label caused those items
-            // to have text that was only selectable/highlighted until the end of the text but not
-            // the end of the menu item
             let item = gtk::MenuItem::with_label("Test");
             let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
-            // we used to format this text with markup and uset set_markup but that causes potential
-            // escaping issues and we just default to plain text now
             let now = Local::now();
             let label_string = if all_day {
                 format!("{}: {}{}", time_string, &event.summary, meeturl_string)
@@ -195,6 +253,16 @@ fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator)
             m.append(&item);
         }
     }
+    
+    // Add "Show Meetings Window" option
+    let show_window_item = gtk::MenuItem::with_label("Show Meetings Window");
+    let events_clone = events.to_vec();
+    show_window_item.connect_activate(move |_| {
+        create_meetings_window(&events_clone);
+    });
+    m.append(&gtk::SeparatorMenuItem::new());
+    m.append(&show_window_item);
+    
     let mi = gtk::MenuItem::with_label("Quit");
     mi.connect_activate(|_| {
         gtk::main_quit();
