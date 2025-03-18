@@ -25,6 +25,11 @@ mod meeters_ical;
 mod timezones;
 mod windows_timezones;
 
+use dbus::blocking::Connection;
+use dbus_crossroads::Crossroads;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 fn get_ical(url: &str) -> Result<String, CalendarError> {
     println!("trying to fetch ical");
     match ureq::get(url).timeout(Duration::new(10, 0)).call() {
@@ -329,30 +334,71 @@ impl TimelineView {
     }
 }
 
-fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
-    // Constants for calculating window size
-    let start_hour = 7;
-    let end_hour = 20;
-    let hour_height = 60;  // Match the hour_height from TimelineView
-    let window_height = (end_hour - start_hour) * hour_height + 100; // Add padding for decorations
+struct WindowManager {
+    current_window: Option<gtk::Window>,
+    events: Arc<Mutex<Vec<domain::Event>>>,
+}
 
-    let window = gtk::Window::new(gtk::WindowType::Toplevel);
-    window.set_title("Today's Meetings");
-    window.set_default_size(700, window_height);
+impl WindowManager {
+    fn new() -> Self {
+        WindowManager {
+            current_window: None,
+            events: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
 
-    let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    main_box.set_margin_start(6);
-    main_box.set_margin_end(6);
-    main_box.set_margin_top(6);
-    main_box.set_margin_bottom(6);
+    fn show_window(&mut self) {
+        // If window exists, just present it
+        if let Some(window) = &self.current_window {
+            window.present();
+            return;
+        }
 
-    // Add timeline view
-    let timeline = TimelineView::new(events.to_vec());
-    main_box.pack_start(&timeline.container, true, true, 0);
+        // Create new window
+        let events = self.events.lock().unwrap();
+        let window = Self::create_meetings_window(&events);
+        
+        // Handle window close
+        let window_clone = window.clone();
+        window.connect_delete_event(move |_, _| {
+            window_clone.hide();
+            gtk::Inhibit(true) // Prevent destruction
+        });
+        
+        window.show_all();
+        self.current_window = Some(window);
+    }
 
-    window.add(&main_box);
-    window.show_all();
-    window
+    fn update_events(&mut self, new_events: Vec<domain::Event>) {
+        let mut events = self.events.lock().unwrap();
+        *events = new_events;
+    }
+
+    fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
+        // Constants for calculating window size
+        let start_hour = 7;
+        let end_hour = 20;
+        let hour_height = 60;  // Match the hour_height from TimelineView
+        let window_height = (end_hour - start_hour) * hour_height + 100; // Add padding for decorations
+
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_title("Today's Meetings");
+        window.set_default_size(700, window_height);
+
+        let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        main_box.set_margin_start(6);
+        main_box.set_margin_end(6);
+        main_box.set_margin_top(6);
+        main_box.set_margin_bottom(6);
+
+        // Add timeline view
+        let timeline = TimelineView::new(events.to_vec());
+        main_box.pack_start(&timeline.container, true, true, 0);
+
+        window.add(&main_box);
+        window.show_all();
+        window
+    }
 }
 
 fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator) {
@@ -413,8 +459,11 @@ fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator)
     // Add "Show Meetings Window" option
     let show_window_item = gtk::MenuItem::with_label("Show Meetings Window");
     let events_clone = events.to_vec();
+    let window_manager = Arc::new(Mutex::new(WindowManager::new()));
+    let window_manager_clone = window_manager.clone();
     show_window_item.connect_activate(move |_| {
-        create_meetings_window(&events_clone);
+        let mut wm = window_manager_clone.lock().unwrap();
+        wm.show_window();
     });
     m.append(&gtk::SeparatorMenuItem::new());
     m.append(&show_window_item);
@@ -532,8 +581,47 @@ fn default_tz(_: dotenvy::Error) -> Result<String, dotenvy::Error> {
     Ok("Europe/Berlin".to_string())
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     load_config()?;
+
+    // Set up D-Bus connection
+    let connection = Connection::new_session().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    connection.request_name("net.aggregat4.Meeters", false, true, false)
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+    // Create window manager
+    let window_manager = Arc::new(Mutex::new(WindowManager::new()));
+    
+    // Create a channel for D-Bus requests
+    let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
+    
+    // Create D-Bus interface
+    let mut cr = Crossroads::new();
+    let dbus_sender_clone = dbus_sender.clone();
+    
+    let iface_token = cr.register("net.aggregat4.Meeters", |b| {
+        b.method("ShowWindow", (), (), move |_, _, ()| {
+            dbus_sender_clone.send(()).unwrap();
+            Ok(())
+        });
+    });
+    
+    cr.insert("/net/aggregat4/Meeters", &[iface_token], ());
+    
+    // Handle D-Bus requests in the main GTK thread
+    let window_manager_clone = Arc::clone(&window_manager);
+    dbus_receiver.attach(None, move |_| {
+        let mut wm = window_manager_clone.lock().unwrap();
+        wm.show_window();
+        glib::Continue(true)
+    });
+    
+    // Spawn D-Bus handler thread
+    let cr_clone = cr;
+    thread::spawn(move || {
+        cr_clone.serve(&connection).unwrap();
+    });
+    
     // Parse config
     let local_tz_iana: String = dotenvy::var("MEETERS_LOCAL_TIMEZONE")
         .or_else(default_tz)
@@ -581,6 +669,10 @@ fn main() -> std::io::Result<()> {
     events_receiver.attach(None, move |event_result| {
         match event_result {
             Ok(TodayEvents(events)) => {
+                // Update window manager with new events
+                let mut wm = window_manager.lock().unwrap();
+                wm.update_events(events.clone());
+                
                 if events.is_empty() {
                     create_indicator_menu(&[], &mut indicator);
                 } else {

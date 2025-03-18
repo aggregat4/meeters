@@ -31,3 +31,6 @@ roxmltree = "0.15.0"
 notify-rust = "4.5.8"
 multimap = "0.8.3"
 either = "1.6.1"
+# D-Bus dependencies
+dbus = "0.9.7"
+dbus-crossroads = "0.5.2"
