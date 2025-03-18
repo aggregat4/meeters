@@ -12,9 +12,9 @@ include = ["assets/*"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libappindicator = "0.7.1"
-gtk = "0.15.5"
-glib = "0.15.12"
+libappindicator = "0.9.0"
+gtk = "0.18.2"
+glib = "0.18.2"
 ureq = "3.0.10"
 ical = "0.11.0"
 property = "0.3.3"

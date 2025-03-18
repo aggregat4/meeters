@@ -136,9 +136,8 @@ fn create_indicator() -> AppIndicator {
         } /*  */
     }
 }
-
 fn open_meeting(meet_url: &str) {
-    match gtk::show_uri(None, meet_url, gtk::current_event_time()) {
+    match gtk::show_uri_on_window(None::<&gtk::Window>, meet_url, gtk::current_event_time()) {
         Ok(_) => (),
         Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
     }
@@ -396,12 +395,12 @@ impl WindowManager {
 
         window.add(&main_box);
         
-        // Handle window close
-        let window_clone = window.clone();
-        window.connect_delete_event(move |_, _| {
-            window_clone.hide();
-            gtk::Inhibit(true) // Prevent destruction
-        });
+        // // Handle window close
+        // let window_clone = window.clone();
+        // window.connect_delete_event(move |_, _| {
+        //     window_clone.hide();
+        //     gtk::Inhibit(true) // Prevent destruction
+        // });
         
         window.show_all();
         self.current_window = Some(window);
@@ -617,7 +616,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window_manager = Arc::new(Mutex::new(WindowManager::new()));
     
     // Create a channel for D-Bus requests
-    let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
+    let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::Priority::DEFAULT);
     
     // Create D-Bus interface
     let mut cr = Crossroads::new();
@@ -664,7 +663,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "toggle" => wm.toggle_window(),
             _ => (),
         }
-        glib::Continue(true)
+        glib::ControlFlow::Continue
     });
     
     // Spawn D-Bus handler thread
@@ -716,7 +715,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     // let (status_sender, status_receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
     let (events_sender, events_receiver) =
-        glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::PRIORITY_DEFAULT);
+        glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::Priority::DEFAULT);
     events_receiver.attach(None, move |event_result| {
         match event_result {
             Ok(TodayEvents(events)) => {
@@ -737,7 +736,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(_) => set_error_icon(&mut indicator),
         }
-        glib::Continue(true)
+        glib::ControlFlow::Continue
     });
     // start the background thread for calendar work
     // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
