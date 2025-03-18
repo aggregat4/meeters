@@ -207,7 +207,7 @@ dependencies = [
  "cairo-sys-rs",
  "glib",
  "libc",
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -627,7 +627,7 @@ dependencies = [
  "glib",
  "libc",
  "once_cell",
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -660,7 +660,7 @@ dependencies = [
  "libc",
  "once_cell",
  "smallvec",
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -791,11 +791,11 @@ dependencies = [
 
 [[package]]
 name = "ical"
-version = "0.7.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9f7215ad0d77e69644570dee000c7678a47ba7441062c1b5f918adde0d73cf"
+checksum = "9b7cab7543a8b7729a19e2c04309f902861293dcdae6558dfbeb634454d279f6"
 dependencies = [
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1178,7 +1178,7 @@ version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb779fcf4bb850fbbb0edc96ff6cf34fd90c4b1a112ce042653280d9a7364048"
 dependencies = [
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
  "ucd-trie",
 ]
 
@@ -1227,7 +1227,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eda0fc3b0fb7c975631757e14d9049da17374063edb6ebbcbc54d880d4fe94e9"
 dependencies = [
  "once_cell",
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
  "toml",
 ]
 
@@ -1331,7 +1331,7 @@ checksum = "b033d837a7cf162d7993aded9304e30a83213c648b6e389db233191f891e5c2b"
 dependencies = [
  "getrandom",
  "redox_syscall",
- "thiserror 1.0.35",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1614,11 +1614,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.35"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c53f98874615aea268107765aa1ed8f6116782501d18e53d08b471733bea6c85"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl 1.0.35",
+ "thiserror-impl 1.0.69",
 ]
 
 [[package]]
@@ -1632,13 +1632,13 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.35"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8b463991b4eab2d801e724172285ec4195c650e8ec79b149e6c2a8e6dd3f783"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.100",
+ "syn 2.0.100",
 ]
 
 [[package]]
