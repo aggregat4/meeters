@@ -141,8 +141,7 @@ fn open_meeting(meet_url: &str) {
 }
 
 struct TimelineView {
-    container: gtk::Box,
-    events: Vec<Event>,
+    container: gtk::Box
 }
 
 impl TimelineView {
@@ -330,8 +329,17 @@ impl TimelineView {
         scrolled_window.add(&layout_box);
         container.pack_start(&scrolled_window, true, true, 0);
 
-        Self { container, events }
+        Self { container }
     }
+}
+
+
+fn calculate_window_height() -> i32 {
+    // Constants for calculating window size
+    let start_hour = 7;
+    let end_hour = 20;
+    let hour_height = 60;  // Match the hour_height from TimelineView
+    (end_hour - start_hour) * hour_height + 70 // Add padding for decorations
 }
 
 struct WindowManager {
@@ -348,15 +356,29 @@ impl WindowManager {
     }
 
     fn show_window(&mut self) {
-        // If window exists, just present it
+        let events = self.events.lock().unwrap();
+        
         if let Some(window) = &self.current_window {
             window.present();
             return;
         }
-
+        
         // Create new window
-        let events = self.events.lock().unwrap();
-        let window = Self::create_meetings_window(&events);
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_title("Today's Meetings");
+        window.set_default_size(700, calculate_window_height());
+
+        let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        main_box.set_margin_start(6);
+        main_box.set_margin_end(6);
+        main_box.set_margin_top(6);
+        main_box.set_margin_bottom(6);
+
+        // Add timeline view
+        let timeline = TimelineView::new(events.to_vec());
+        main_box.pack_start(&timeline.container, true, true, 0);
+
+        window.add(&main_box);
         
         // Handle window close
         let window_clone = window.clone();
@@ -370,38 +392,26 @@ impl WindowManager {
     }
 
     fn update_events(&mut self, new_events: Vec<domain::Event>) {
+        // Update stored events
         let mut events = self.events.lock().unwrap();
         *events = new_events;
+        
+        // Update window if it exists
+        if let Some(window) = &self.current_window {
+            if let Some(main_box) = window.children().first() {
+                let main_box = main_box.clone().downcast::<gtk::Box>().unwrap();
+                main_box.children().iter().for_each(|child| main_box.remove(child));
+                
+                let timeline = TimelineView::new(events.to_vec());
+                main_box.pack_start(&timeline.container, true, true, 0);
+                main_box.show_all();
+            }
+        }
     }
 
-    fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
-        // Constants for calculating window size
-        let start_hour = 7;
-        let end_hour = 20;
-        let hour_height = 60;  // Match the hour_height from TimelineView
-        let window_height = (end_hour - start_hour) * hour_height + 100; // Add padding for decorations
-
-        let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Today's Meetings");
-        window.set_default_size(700, window_height);
-
-        let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        main_box.set_margin_start(6);
-        main_box.set_margin_end(6);
-        main_box.set_margin_top(6);
-        main_box.set_margin_bottom(6);
-
-        // Add timeline view
-        let timeline = TimelineView::new(events.to_vec());
-        main_box.pack_start(&timeline.container, true, true, 0);
-
-        window.add(&main_box);
-        window.show_all();
-        window
-    }
 }
 
-fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator) {
+fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator, window_manager: Arc<Mutex<WindowManager>>) {
     let mut m: Menu = gtk::Menu::new();
     let mut nof_upcoming_meetings = 0;
     if events.is_empty() {
@@ -458,9 +468,7 @@ fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator)
     
     // Add "Show Meetings Window" option
     let show_window_item = gtk::MenuItem::with_label("Show Meetings Window");
-    let events_clone = events.to_vec();
-    let window_manager = Arc::new(Mutex::new(WindowManager::new()));
-    let window_manager_clone = window_manager.clone();
+    let window_manager_clone = Arc::clone(&window_manager);
     show_window_item.connect_activate(move |_| {
         let mut wm = window_manager_clone.lock().unwrap();
         wm.show_window();
@@ -597,22 +605,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create D-Bus interface
     let mut cr = Crossroads::new();
-    let dbus_sender_clone = dbus_sender.clone();
     
-    let iface_token = cr.register("net.aggregat4.Meeters", |b| {
-        b.method("ShowWindow", (), (), move |_, _, ()| {
-            dbus_sender_clone.send(()).unwrap();
-            Ok(())
-        });
-    });
+    let iface_token = {
+        let show_sender = dbus_sender.clone();
+        let close_sender = dbus_sender.clone();
+        
+        cr.register("net.aggregat4.Meeters", move |b| {
+            let show_sender = show_sender.clone();
+            b.method("ShowWindow", (), (), move |_, _, ()| {
+                show_sender.send(("show", ())).unwrap();
+                Ok(())
+            });
+            
+            let close_sender = close_sender.clone();
+            b.method("CloseWindow", (), (), move |_, _, ()| {
+                close_sender.send(("close", ())).unwrap();
+                Ok(())
+            });
+        })
+    };
     
     cr.insert("/net/aggregat4/Meeters", &[iface_token], ());
     
     // Handle D-Bus requests in the main GTK thread
     let window_manager_clone = Arc::clone(&window_manager);
-    dbus_receiver.attach(None, move |_| {
+    dbus_receiver.attach(None, move |(action, _)| {
         let mut wm = window_manager_clone.lock().unwrap();
-        wm.show_window();
+        match action {
+            "show" => wm.show_window(),
+            "close" => {
+                if let Some(window) = &wm.current_window {
+                    window.hide();
+                }
+            },
+            _ => (),
+        }
         glib::Continue(true)
     });
     
@@ -660,7 +687,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // );
     // set up our widgets
     let mut indicator = create_indicator();
-    create_indicator_menu(&[], &mut indicator);
+    create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     // let (status_sender, status_receiver) = glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
@@ -674,9 +701,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 wm.update_events(events.clone());
                 
                 if events.is_empty() {
-                    create_indicator_menu(&[], &mut indicator);
+                    create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
                 } else {
-                    create_indicator_menu(&events, &mut indicator);
+                    create_indicator_menu(&events, &mut indicator, Arc::clone(&window_manager));
                 }
             }
             Ok(EventNotification(event)) => {
