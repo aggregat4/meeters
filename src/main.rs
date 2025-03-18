@@ -136,128 +136,167 @@ fn open_meeting(meet_url: &str) {
 }
 
 struct TimelineView {
-    drawing_area: DrawingArea,
+    container: gtk::Box,
     events: Vec<Event>,
 }
 
 impl TimelineView {
     fn new(events: Vec<Event>) -> Self {
-        let drawing_area = DrawingArea::new();
-        drawing_area.set_size_request(300, 600);
-        let events_clone = events.clone();
-        drawing_area.connect_draw(move |area, context| {
-            let allocation = area.allocation();
-            let width = allocation.width();
-            let height = allocation.height();
-            Self::draw_timeline(context, width, height, &events_clone);
-            Inhibit(false)
-        });
-        Self { drawing_area, events }
-    }
+        let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        container.set_margin_start(12);
+        container.set_margin_end(12);
+        container.set_margin_top(12);
+        container.set_margin_bottom(12);
 
-    fn draw_timeline(context: &cairo::Context, width: i32, height: i32, events: &[Event]) {
-        // Set up the drawing context
-        context.set_source_rgb(0.95, 0.95, 0.95);
-        context.paint().unwrap();
-        
         // Constants for business hours
         let start_hour = 7;
         let end_hour = 20;
         let total_hours = end_hour - start_hour;
-        
-        // Draw time markers and events
+        let base_height = 30; // Base height for 15-minute blocks
+        let min_height = 20;  // Minimum height for very short meetings
+        let button_width = 330; // Total width available for buttons
+
+        // Create a fixed container for absolute positioning
+        let fixed = gtk::Fixed::new();
+        fixed.set_size_request(350, (end_hour - start_hour + 1) * base_height * 4);
+
+        // Add hour markers
         for hour in start_hour..=end_hour {
-            let y = (height as f64) * ((hour - start_hour) as f64 / total_hours as f64);
-            
-            // Draw hour marker line
-            context.set_source_rgb(0.7, 0.7, 0.7);
-            context.set_line_width(1.0);
-            context.move_to(0.0, y);
-            context.line_to(width as f64, y);
-            context.stroke().unwrap();
-            
-            // Add hour label
-            context.set_source_rgb(0.3, 0.3, 0.3);
-            context.set_font_size(10.0);
-            context.move_to(5.0, y - 2.0);
-            context.show_text(&format!("{:02}:00", hour)).unwrap();
-            
-            // Draw events for this hour
-            for event in events {
-                if event.start_timestamp.time() == event.end_timestamp.time() {
-                    continue; // Skip all-day events
-                }
+            let hour_label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
+            hour_label.set_width_chars(5);
+            hour_label.set_xalign(0.0);
+            fixed.put(&hour_label, 0, ((hour - start_hour) * base_height * 4) as i32);
+
+            // Add a subtle line for this hour
+            let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
+            separator.set_size_request(button_width, 1);
+            fixed.put(&separator, 40, ((hour - start_hour) * base_height * 4) as i32);
+        }
+
+        // First, group overlapping events
+        let mut event_groups: Vec<Vec<&Event>> = Vec::new();
+        
+        for event in &events {
+            if event.start_timestamp.time() == event.end_timestamp.time() {
+                continue; // Skip all-day events
+            }
+
+            // Find a group where this event overlaps with any existing event
+            let mut found_group = false;
+            for group in &mut event_groups {
+                let overlaps = group.iter().any(|existing| {
+                    !(event.end_timestamp <= existing.start_timestamp || 
+                      event.start_timestamp >= existing.end_timestamp)
+                });
                 
-                let event_start_hour = event.start_timestamp.hour();
-                let event_end_hour = event.end_timestamp.hour();
-                
-                if event_start_hour <= hour && event_end_hour > hour {
-                    let start_y = if event_start_hour == hour {
-                        // Calculate position within the hour
-                        let minutes = event.start_timestamp.minute() as f64;
-                        let hour_height = (height as f64) / total_hours as f64;
-                        y - hour_height + (hour_height * minutes / 60.0)
-                    } else {
-                        y - (height as f64) / total_hours as f64
-                    };
-                    
-                    let end_y = if event_end_hour == hour {
-                        // Calculate position within the hour
-                        let minutes = event.end_timestamp.minute() as f64;
-                        let hour_height = (height as f64) / total_hours as f64;
-                        y - hour_height + (hour_height * minutes / 60.0)
-                    } else {
-                        y
-                    };
-                    
-                    // Draw event block
-                    let now = Local::now();
-                    if now >= event.start_timestamp && now <= event.end_timestamp {
-                        context.set_source_rgb(0.4, 0.6, 0.9); // Current meeting - blue
-                    } else if now < event.start_timestamp {
-                        context.set_source_rgb(0.6, 0.8, 0.6); // Upcoming - light green
-                    } else {
-                        context.set_source_rgb(0.9, 0.9, 0.9); // Past - light gray
-                    }
-                    
-                    context.rectangle(40.0, start_y, width as f64 - 45.0, end_y - start_y);
-                    context.fill().unwrap();
-                    context.stroke().unwrap();
-                    
-                    // Add event text
-                    context.set_source_rgb(0.0, 0.0, 0.0);
-                    context.set_font_size(10.0);
-                    context.move_to(45.0, start_y + 15.0);
-                    context.show_text(&event.summary).unwrap();
+                if overlaps {
+                    group.push(event);
+                    found_group = true;
+                    break;
                 }
             }
-        }
-        
-        // Draw current time indicator
-        let now = Local::now();
-        if now.hour() >= start_hour && now.hour() < end_hour {
-            let current_y = (height as f64) * ((now.hour() - start_hour) as f64 / total_hours as f64);
-            let minutes = now.minute() as f64;
-            let hour_height = (height as f64) / total_hours as f64;
-            let current_position = current_y - hour_height + (hour_height * minutes / 60.0);
             
-            context.set_source_rgb(0.9, 0.2, 0.2);
-            context.set_line_width(2.0);
-            context.move_to(0.0, current_position);
-            context.line_to(width as f64, current_position);
-            context.stroke().unwrap();
-            
-            // Draw a small circle at the current time
-            context.arc(width as f64 - 10.0, current_position, 5.0, 0.0, 2.0 * std::f64::consts::PI);
-            context.fill().unwrap();
+            if !found_group {
+                // Create a new group with just this event
+                event_groups.push(vec![event]);
+            }
         }
+
+        // Now process each group
+        for group in event_groups {
+            let group_size = group.len() as i32;
+            let individual_width = if group_size > 1 {
+                (button_width - 10 * (group_size - 1)) / group_size
+            } else {
+                button_width
+            };
+
+            for (index, event) in group.iter().enumerate() {
+                let event_start = event.start_timestamp.with_timezone(&Local);
+                let event_end = event.end_timestamp.with_timezone(&Local);
+                
+                // Calculate position and size
+                let start_hour = event_start.hour() as i32;
+                let start_minute = event_start.minute() as i32;
+                let duration = event_end.signed_duration_since(event_start);
+                let duration_minutes = duration.num_minutes() as i32;
+
+                // Calculate y position and height
+                let minutes_from_start = ((start_hour - 7) * 60 + start_minute) as i32;  // 7 is start_hour
+                let y_position = (minutes_from_start * base_height) / 15;
+                let height = (duration_minutes * base_height) / 15;
+
+                // Create event button
+                let button = gtk::Button::new();
+                button.set_size_request(individual_width, height.max(min_height));
+
+                // Style the button based on event status
+                let now = Local::now();
+                let (r, g, b) = if now >= event.start_timestamp && now <= event.end_timestamp {
+                    (0.4, 0.6, 0.9) // Current meeting - blue
+                } else if now < event.start_timestamp {
+                    (0.6, 0.8, 0.6) // Upcoming - light green
+                } else {
+                    (0.9, 0.9, 0.9) // Past - light gray
+                };
+
+                // Create a colored background
+                let style_context = button.style_context();
+                let css = format!(
+                    "button {{ background-color: rgb({}, {}, {}); border-radius: 4px; }}",
+                    (r * 255.0) as u8,
+                    (g * 255.0) as u8,
+                    (b * 255.0) as u8
+                );
+                let provider = gtk::CssProvider::new();
+                provider.load_from_data(css.as_bytes()).unwrap();
+                style_context.add_provider(
+                    &provider,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                );
+
+                // Add event text with time
+                let time_str = format!(
+                    "{} - {}",
+                    event_start.format("%H:%M"),
+                    event_end.format("%H:%M")
+                );
+                let label = gtk::Label::new(Some(&format!("{}\n{}", time_str, event.summary)));
+                label.set_line_wrap(true);
+                label.set_xalign(0.0);
+                label.set_margin_start(4);
+                label.set_margin_end(4);
+                label.set_margin_top(4);
+                label.set_margin_bottom(4);
+                button.add(&label);
+
+                // Add click handler for meetings with URLs
+                if let Some(meet_url) = &event.meeturl {
+                    let url = meet_url.clone();
+                    button.connect_clicked(move |_| {
+                        open_meeting(&url);
+                    });
+                }
+
+                // Position the button with offset for overlapping events
+                let x_position = 40 + (individual_width + 10) * index as i32;
+                fixed.put(&button, x_position, y_position);
+            }
+        }
+
+        // Add the fixed container to a scrolled window
+        let scrolled_window = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        scrolled_window.add(&fixed);
+        container.pack_start(&scrolled_window, true, true, 0);
+
+        Self { container, events }
     }
 }
 
 fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     window.set_title("Today's Meetings");
-    window.set_default_size(300, 600);
+    window.set_default_size(400, 800);
 
     let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
     main_box.set_margin_start(12);
@@ -267,7 +306,7 @@ fn create_meetings_window(events: &[domain::Event]) -> gtk::Window {
 
     // Add timeline view
     let timeline = TimelineView::new(events.to_vec());
-    main_box.pack_start(&timeline.drawing_area, true, true, 0);
+    main_box.pack_start(&timeline.container, true, true, 0);
 
     window.add(&main_box);
     window.show_all();
