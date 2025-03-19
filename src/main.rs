@@ -143,8 +143,6 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
-const START_HOUR: i32 = 8;  // 7 AM
-const END_HOUR: i32 = 19;   // 8 PM
 const HOUR_HEIGHT: i32 = 60;  // Height for one hour
 
 struct TimelineView {
@@ -211,7 +209,7 @@ impl TimelineView {
         button
     }
 
-    fn new(events: Vec<Event>) -> Self {
+    fn new(events: Vec<Event>, start_hour: i32, end_hour: i32) -> Self {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         container.set_margin_start(12);
         container.set_margin_end(12);
@@ -265,8 +263,8 @@ impl TimelineView {
         meeting_area.set_hexpand(true);
 
         // Add hour markers and grid lines
-        for hour in START_HOUR..=END_HOUR {
-            let y_position = (hour - START_HOUR) * HOUR_HEIGHT;
+        for hour in start_hour..=end_hour {
+            let y_position = (hour - start_hour) * HOUR_HEIGHT;
             
             // Hour label
             let label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
@@ -280,7 +278,7 @@ impl TimelineView {
             let style_context = separator.style_context();
             
             // Different styles for start/end of day vs regular hours
-            let css = if hour == START_HOUR || hour == END_HOUR {
+            let css = if hour == start_hour || hour == end_hour {
                 "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; margin: 0; padding: 0; }"
             } else {
                 "box { background-color: rgba(200, 200, 200, 0.3); min-height: 1px; margin: 0; padding: 0; }"
@@ -297,8 +295,8 @@ impl TimelineView {
         let now = Local::now();
         let current_hour = now.hour() as i32;
         let current_minute = now.minute() as i32;
-        if current_hour >= START_HOUR && current_hour <= END_HOUR {
-            let minutes_from_start = (current_hour - START_HOUR) * 60 + current_minute;
+        if current_hour >= start_hour && current_hour <= end_hour {
+            let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
             let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
             
             let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -346,7 +344,7 @@ impl TimelineView {
                 let event_end = event.end_timestamp.with_timezone(&Local);
                 
                 // Calculate position
-                let start_minutes = (event_start.hour() as i32 - START_HOUR) * 60 + event_start.minute() as i32;
+                let start_minutes = (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
                 let duration_minutes = event_end.signed_duration_since(event_start).num_minutes() as i32;
                 
                 let y_position = (start_minutes * HOUR_HEIGHT) / 60;
@@ -363,7 +361,7 @@ impl TimelineView {
         layout_box.pack_start(&meeting_area, true, true, 0);
 
         // Set a minimum height for the layout - no need for +1 as we want to end exactly at end_hour
-        let total_height = (END_HOUR - START_HOUR) * HOUR_HEIGHT;
+        let total_height = (end_hour - start_hour) * HOUR_HEIGHT;
         layout_box.set_size_request(-1, total_height);
 
         // Add to scrolled window
@@ -377,21 +375,25 @@ impl TimelineView {
 }
 
 
-fn calculate_window_height() -> i32 {
+fn calculate_window_height(start_hour: i32, end_hour: i32) -> i32 {
     // Constants for calculating window size
-    (END_HOUR - START_HOUR) * HOUR_HEIGHT + HOUR_HEIGHT + 90 // Add padding for decorations
+    (end_hour - start_hour) * HOUR_HEIGHT + HOUR_HEIGHT + 90 // Add padding for decorations
 }
 
 struct WindowManager {
     current_window: Option<gtk::Window>,
     events: Arc<Mutex<Vec<domain::Event>>>,
+    start_hour: i32,
+    end_hour: i32,
 }
 
 impl WindowManager {
-    fn new() -> Self {
+    fn new(start_hour: i32, end_hour: i32) -> Self {
         WindowManager {
             current_window: None,
             events: Arc::new(Mutex::new(Vec::new())),
+            start_hour,
+            end_hour,
         }
     }
 
@@ -420,7 +422,7 @@ impl WindowManager {
         // Create new window
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         window.set_title("Today's Meetings");
-        window.set_default_size(700, calculate_window_height());
+        window.set_default_size(700, calculate_window_height(self.start_hour, self.end_hour));
 
         let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         main_box.set_margin_start(6);
@@ -429,7 +431,7 @@ impl WindowManager {
         main_box.set_margin_bottom(6);
 
         // Add timeline view
-        let timeline = TimelineView::new(events.to_vec());
+        let timeline = TimelineView::new(events.to_vec(), self.start_hour, self.end_hour);
         main_box.pack_start(&timeline.container, true, true, 0);
 
         window.add(&main_box);
@@ -456,7 +458,7 @@ impl WindowManager {
                 let main_box = main_box.clone().downcast::<gtk::Box>().unwrap();
                 main_box.children().iter().for_each(|child| main_box.remove(child));
                 
-                let timeline = TimelineView::new(events.to_vec());
+                let timeline = TimelineView::new(events.to_vec(), self.start_hour, self.end_hour);
                 main_box.pack_start(&timeline.container, true, true, 0);
                 main_box.show_all();
             }
@@ -633,6 +635,10 @@ const DEFAULT_POLLING_INTERVAL_MS: u128 = 2 * 60 * 1000;
 const DEFAULT_EVENT_WARNING_TIME_SECONDS: i64 = 60;
 /// This is a prefix used to identify notification actions that are meant to open a meeting
 const MEETERS_NOTIFICATION_ACTION_OPEN_MEETING: &str = "meeters_open_meeting:";
+/// Default start hour for the timeline view (8 AM)
+const DEFAULT_START_HOUR: i32 = 8;
+/// Default end hour for the timeline view (8 PM)
+const DEFAULT_END_HOUR: i32 = 20;
 
 enum CalendarMessages {
     TodayEvents(Vec<Event>),
@@ -645,6 +651,40 @@ fn default_tz(_: dotenvy::Error) -> Result<String, dotenvy::Error> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     load_config()?;
+    
+    // Parse config
+    let local_tz_iana: String = dotenvy::var("MEETERS_LOCAL_TIMEZONE")
+        .or_else(default_tz)
+        .unwrap();
+    let local_tz: Tz = local_tz_iana
+        .parse()
+        .expect("Expecting to be able to parse the local timezone, instead got an error");
+    let config_ical_url = dotenvy::var("MEETERS_ICAL_URL")
+        .expect("Expecting a configuration property with name MEETERS_ICAL_URL");
+    let config_show_event_notification: bool = match dotenvy::var("MEETERS_EVENT_NOTIFICATION") {
+        Ok(val) => val.parse::<bool>().expect(
+            "Value for MEETERS_EVENT_NOTIFICATION configuration parameter must be a boolean",
+        ),
+        Err(_) => true,
+    };
+    let config_polling_interval_ms: u128 = match dotenvy::var("MEETERS_POLLING_INTERVAL_MS") {
+        Ok(val) => val.parse::<u128>().expect("MEETERS_POLLING_INTERVAL_MS must be a positive integer expressing the polling interval in milliseconds"),
+        Err(_) => DEFAULT_POLLING_INTERVAL_MS
+    };
+    let config_event_warning_time_seconds: i64 = match dotenvy::var("MEETERS_EVENT_WARNING_TIME_SECONDS") {
+        Ok(val) => val.parse::<i64>().expect("MEETERS_EVENT_WARNING_TIME_SECONDS must be a positive integer expressing the polling interval in seconds"),
+        Err(_) => DEFAULT_EVENT_WARNING_TIME_SECONDS
+    };
+    let config_start_hour: i32 = match dotenvy::var("MEETERS_TODAY_START_HOUR") {
+        Ok(val) => val.parse::<i32>().expect("MEETERS_TODAY_START_HOUR defines the start hour of the today view,must be a positive integer between 0 and 23"),
+        Err(_) => DEFAULT_START_HOUR
+    };
+    let config_end_hour: i32 = match dotenvy::var("MEETERS_TODAY_END_HOUR") {
+        Ok(val) => val.parse::<i32>().expect("MEETERS_TODAY_END_HOUR defines the end hour of the today view, must be a positive integer between 0 and 23"),
+        Err(_) => DEFAULT_END_HOUR
+    };
+    println!("Local Timezone configured as {}", local_tz_iana.clone());
+
 
     // Set up D-Bus connection
     let connection = Connection::new_session().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -652,7 +692,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
     // Create window manager
-    let window_manager = Arc::new(Mutex::new(WindowManager::new()));
+    let window_manager = Arc::new(Mutex::new(WindowManager::new(config_start_hour, config_end_hour)));
     
     // Create a channel for D-Bus requests
     let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::Priority::DEFAULT);
@@ -710,31 +750,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     thread::spawn(move || {
         cr_clone.serve(&connection).unwrap();
     });
-    
-    // Parse config
-    let local_tz_iana: String = dotenvy::var("MEETERS_LOCAL_TIMEZONE")
-        .or_else(default_tz)
-        .unwrap();
-    let local_tz: Tz = local_tz_iana
-        .parse()
-        .expect("Expecting to be able to parse the local timezone, instead got an error");
-    let config_ical_url = dotenvy::var("MEETERS_ICAL_URL")
-        .expect("Expecting a configuration property with name MEETERS_ICAL_URL");
-    let config_show_event_notification: bool = match dotenvy::var("MEETERS_EVENT_NOTIFICATION") {
-        Ok(val) => val.parse::<bool>().expect(
-            "Value for MEETERS_EVENT_NOTIFICATION configuration parameter must be a boolean",
-        ),
-        Err(_) => true,
-    };
-    let config_polling_interval_ms: u128 = match dotenvy::var("MEETERS_POLLING_INTERVAL_MS") {
-        Ok(val) => val.parse::<u128>().expect("MEETERS_POLLING_INTERVAL_MS must be a positive integer expressing the polling interval in milliseconds"),
-        Err(_) => DEFAULT_POLLING_INTERVAL_MS
-    };
-    let config_event_warning_time_seconds: i64 = match dotenvy::var("MEETERS_EVENT_WARNING_TIME_SECONDS") {
-        Ok(val) => val.parse::<i64>().expect("MEETERS_EVENT_WARNING_TIME_SECONDS must be a positive integer expressing the polling interval in seconds"),
-        Err(_) => DEFAULT_EVENT_WARNING_TIME_SECONDS
-    };
-    println!("Local Timezone configured as {}", local_tz_iana.clone());
+
+
     // magic incantation for gtk
     gtk::init().unwrap();
     // I can't get styles to work in appindicators
