@@ -274,11 +274,11 @@ impl TimelineView {
                 let now = Local::now();
                 let style_context = button.style_context();
                 let color = if now >= event.start_timestamp && now <= event.end_timestamp {
-                    "rgba(100, 150, 255, 0.9)"  // Current - blue
+                    "rgba(100, 150, 255, 0.6)"  // Current - lighter blue
                 } else if now < event.start_timestamp {
-                    "rgba(150, 200, 150, 0.9)"  // Upcoming - green
+                    "rgba(150, 200, 150, 0.6)"  // Upcoming - lighter green
                 } else {
-                    "rgba(220, 220, 220, 0.9)"  // Past - gray
+                    "rgba(220, 220, 220, 0.6)"  // Past - lighter gray
                 };
 
                 let css = format!(
