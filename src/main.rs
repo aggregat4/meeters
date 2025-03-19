@@ -143,8 +143,8 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
-const START_HOUR: i32 = 7;  // 7 AM
-const END_HOUR: i32 = 20;   // 8 PM
+const START_HOUR: i32 = 8;  // 7 AM
+const END_HOUR: i32 = 19;   // 8 PM
 const HOUR_HEIGHT: i32 = 60;  // Height for one hour
 
 struct TimelineView {
@@ -411,8 +411,10 @@ impl WindowManager {
         let events = self.events.lock().unwrap();
         
         if let Some(window) = &self.current_window {
-            window.present();
-            return;
+            if window.is_visible() {
+                window.present();
+                return;
+            }
         }
         
         // Create new window
@@ -432,12 +434,12 @@ impl WindowManager {
 
         window.add(&main_box);
         
-        // // Handle window close
-        // let window_clone = window.clone();
-        // window.connect_delete_event(move |_, _| {
-        //     window_clone.hide();
-        //     gtk::Inhibit(true) // Prevent destruction
-        // });
+        // Handle window close
+        let window_clone = window.clone();
+        window.connect_delete_event(move |_, _| {
+            window_clone.hide();
+            glib::Propagation::Stop
+        });
         
         window.show_all();
         self.current_window = Some(window);
