@@ -143,8 +143,12 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
+const START_HOUR: i32 = 7;  // 7 AM
+const END_HOUR: i32 = 20;   // 8 PM
+const HOUR_HEIGHT: i32 = 60;  // Height for one hour
+
 struct TimelineView {
-    container: gtk::Box
+    container: gtk::Box,
 }
 
 impl TimelineView {
@@ -155,10 +159,67 @@ impl TimelineView {
         container.set_margin_top(12);
         container.set_margin_bottom(12);
 
-        // Constants for layout
-        let start_hour: i32 = 7;  // 7 AM
-        let end_hour: i32 = 20;   // 8 PM
-        let hour_height: i32 = 60;  // Height for one hour
+        // Separate all-day events from regular events
+        let (all_day_events, regular_events): (Vec<_>, Vec<_>) = events
+            .into_iter()
+            .partition(|e| e.start_timestamp.time() == e.end_timestamp.time());
+
+        // Create all-day events section if there are any
+        if !all_day_events.is_empty() {
+            let all_day_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            all_day_container.set_margin_bottom(12);
+
+            // Add "All Day" label
+            let all_day_label = gtk::Label::new(Some("All Day"));
+            all_day_label.set_xalign(0.0);
+            all_day_label.set_margin_bottom(4);
+            all_day_container.pack_start(&all_day_label, false, false, 0);
+
+            // Create horizontal box for all-day events
+            let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            
+            // Calculate button width based on number of events
+            let available_width = 600; // Match the timeline width
+            let button_width = ((available_width - (6 * (all_day_events.len() as i32 + 1))) / all_day_events.len() as i32).max(150);
+            
+            for event in all_day_events {
+                let button = gtk::Button::new();
+                button.set_size_request(button_width, 40); // Fixed height for all-day events
+
+                // Style the button
+                let style_context = button.style_context();
+                let css = "button { background: rgba(200, 200, 255, 0.6); border-radius: 4px; }";
+                let provider = gtk::CssProvider::new();
+                provider.load_from_data(css.as_bytes()).unwrap();
+                style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+                // Add event text
+                let label = gtk::Label::new(Some(&event.summary));
+                label.set_line_wrap(true);
+                label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+                label.set_justify(gtk::Justification::Left);
+                label.set_xalign(0.0);
+                label.set_margin_start(8);
+                label.set_margin_end(8);
+                label.set_margin_top(4);
+                label.set_margin_bottom(4);
+                button.add(&label);
+
+                // Add click handler for meeting URL if available
+                if let Some(meet_url) = &event.meeturl {
+                    let url = meet_url.clone();
+                    button.connect_clicked(move |_| {
+                        open_meeting(&url);
+                    });
+                }
+
+                all_day_events_box.pack_start(&button, true, true, 0);
+            }
+
+            all_day_container.pack_start(&all_day_events_box, false, false, 0);
+            container.pack_start(&all_day_container, false, false, 0);
+        }
+
         let time_label_width: i32 = 50;
         let spacing: i32 = 10;
 
@@ -174,8 +235,8 @@ impl TimelineView {
         meeting_area.set_hexpand(true);
 
         // Add hour markers and grid lines
-        for hour in start_hour..=end_hour {
-            let y_position = (hour - start_hour) * hour_height;
+        for hour in START_HOUR..=END_HOUR {
+            let y_position = (hour - START_HOUR) * HOUR_HEIGHT;
             
             // Hour label
             let label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
@@ -189,7 +250,7 @@ impl TimelineView {
             let style_context = separator.style_context();
             
             // Different styles for start/end of day vs regular hours
-            let css = if hour == start_hour || hour == end_hour {
+            let css = if hour == START_HOUR || hour == END_HOUR {
                 "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; margin: 0; padding: 0; }"
             } else {
                 "box { background-color: rgba(200, 200, 200, 0.3); min-height: 1px; margin: 0; padding: 0; }"
@@ -206,9 +267,9 @@ impl TimelineView {
         let now = Local::now();
         let current_hour = now.hour() as i32;
         let current_minute = now.minute() as i32;
-        if current_hour >= start_hour && current_hour <= end_hour {
-            let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
-            let y_position = (minutes_from_start * hour_height) / 60;
+        if current_hour >= START_HOUR && current_hour <= END_HOUR {
+            let minutes_from_start = (current_hour - START_HOUR) * 60 + current_minute;
+            let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
             
             let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             current_time_marker.set_size_request(600, -1); // Match separator width
@@ -224,11 +285,7 @@ impl TimelineView {
 
         // Group overlapping events
         let mut event_groups: Vec<Vec<&Event>> = Vec::new();
-        for event in &events {
-            if event.start_timestamp.time() == event.end_timestamp.time() {
-                continue; // Skip all-day events
-            }
-
+        for event in &regular_events {
             let mut found_group = false;
             for group in &mut event_groups {
                 let overlaps = group.iter().any(|existing| {
@@ -259,11 +316,11 @@ impl TimelineView {
                 let event_end = event.end_timestamp.with_timezone(&Local);
                 
                 // Calculate position
-                let start_minutes = (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
+                let start_minutes = (event_start.hour() as i32 - START_HOUR) * 60 + event_start.minute() as i32;
                 let duration_minutes = event_end.signed_duration_since(event_start).num_minutes() as i32;
                 
-                let y_position = (start_minutes * hour_height) / 60;
-                let height = (duration_minutes * hour_height) / 60;
+                let y_position = (start_minutes * HOUR_HEIGHT) / 60;
+                let height = (duration_minutes * HOUR_HEIGHT) / 60;
                 let x_position = spacing + (button_width + spacing) * index as i32;
 
                 // Create event button
@@ -306,7 +363,7 @@ impl TimelineView {
                 label.set_margin_bottom(4);
                 button.add(&label);
 
-                // Add click handler
+                // Add click handler for meeting URL if available
                 if let Some(meet_url) = &event.meeturl {
                     let url = meet_url.clone();
                     button.connect_clicked(move |_| {
@@ -323,7 +380,7 @@ impl TimelineView {
         layout_box.pack_start(&meeting_area, true, true, 0);
 
         // Set a minimum height for the layout - no need for +1 as we want to end exactly at end_hour
-        let total_height = (end_hour - start_hour) * hour_height;
+        let total_height = (END_HOUR - START_HOUR) * HOUR_HEIGHT;
         layout_box.set_size_request(-1, total_height);
 
         // Add to scrolled window
@@ -339,10 +396,7 @@ impl TimelineView {
 
 fn calculate_window_height() -> i32 {
     // Constants for calculating window size
-    let start_hour = 7;
-    let end_hour = 20;
-    let hour_height = 60;  // Match the hour_height from TimelineView
-    (end_hour - start_hour) * hour_height + 70 // Add padding for decorations
+    (END_HOUR - START_HOUR) * HOUR_HEIGHT + HOUR_HEIGHT + 90 // Add padding for decorations
 }
 
 struct WindowManager {
