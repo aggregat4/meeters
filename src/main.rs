@@ -194,7 +194,7 @@ impl TimelineView {
                 style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
                 // Add event text
-                let label = gtk::Label::new(Some(&event.summary));
+                let label = gtk::Label::new(Some(&format!("{} {}", event.summary, if event.meeturl.is_some() { "📹" } else { "" })));
                 label.set_line_wrap(true);
                 label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
                 label.set_justify(gtk::Justification::Left);
@@ -352,7 +352,7 @@ impl TimelineView {
                     event_start.format("%H:%M"),
                     event_end.format("%H:%M")
                 );
-                let label = gtk::Label::new(Some(&format!("{}  {}", time_str, event.summary)));
+                let label = gtk::Label::new(Some(&format!("{}  {}{}", time_str, event.summary, if event.meeturl.is_some() { " 📹" } else { "" })));
                 label.set_line_wrap(true);
                 label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
                 label.set_justify(gtk::Justification::Left);
