@@ -152,6 +152,65 @@ struct TimelineView {
 }
 
 impl TimelineView {
+    fn create_event_button(event: &Event, width: i32, height: i32, show_time: bool) -> gtk::Button {
+        let button = gtk::Button::new();
+        button.set_size_request(width, height.max(30));
+
+        // Style based on event status
+        let now = Local::now();
+        let style_context = button.style_context();
+        let color = if now >= event.start_timestamp && now <= event.end_timestamp {
+            "rgba(100, 150, 255, 0.6)"  // Current - lighter blue
+        } else if now < event.start_timestamp {
+            "rgba(150, 200, 150, 0.6)"  // Upcoming - lighter green
+        } else {
+            "rgba(220, 220, 220, 0.6)"  // Past - lighter gray
+        };
+
+        let css = format!(
+            "button {{ background: {}; border-radius: 4px; }}",
+            color
+        );
+        let provider = gtk::CssProvider::new();
+        provider.load_from_data(css.as_bytes()).unwrap();
+        style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+        // Add event text
+        let text = if show_time {
+            let event_start = event.start_timestamp.with_timezone(&Local);
+            let event_end = event.end_timestamp.with_timezone(&Local);
+            let time_str = format!(
+                "{} - {}",
+                event_start.format("%H:%M"),
+                event_end.format("%H:%M")
+            );
+            format!("{}  {}{}", time_str, event.summary, if event.meeturl.is_some() { " 📹" } else { "" })
+        } else {
+            format!("{}{}", event.summary, if event.meeturl.is_some() { " 📹" } else { "" })
+        };
+
+        let label = gtk::Label::new(Some(&text));
+        label.set_line_wrap(true);
+        label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+        label.set_justify(gtk::Justification::Left);
+        label.set_xalign(0.0);
+        label.set_margin_start(8);
+        label.set_margin_end(8);
+        label.set_margin_top(4);
+        label.set_margin_bottom(4);
+        button.add(&label);
+
+        // Add click handler for meeting URL if available
+        if let Some(meet_url) = &event.meeturl {
+            let url = meet_url.clone();
+            button.connect_clicked(move |_| {
+                open_meeting(&url);
+            });
+        }
+
+        button
+    }
+
     fn new(events: Vec<Event>) -> Self {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         container.set_margin_start(12);
@@ -183,36 +242,7 @@ impl TimelineView {
             let button_width = ((available_width - (6 * (all_day_events.len() as i32 + 1))) / all_day_events.len() as i32).max(150);
             
             for event in all_day_events {
-                let button = gtk::Button::new();
-                button.set_size_request(button_width, 40); // Fixed height for all-day events
-
-                // Style the button
-                let style_context = button.style_context();
-                let css = "button { background: rgba(200, 200, 255, 0.6); border-radius: 4px; }";
-                let provider = gtk::CssProvider::new();
-                provider.load_from_data(css.as_bytes()).unwrap();
-                style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-
-                // Add event text
-                let label = gtk::Label::new(Some(&format!("{} {}", event.summary, if event.meeturl.is_some() { "📹" } else { "" })));
-                label.set_line_wrap(true);
-                label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
-                label.set_justify(gtk::Justification::Left);
-                label.set_xalign(0.0);
-                label.set_margin_start(8);
-                label.set_margin_end(8);
-                label.set_margin_top(4);
-                label.set_margin_bottom(4);
-                button.add(&label);
-
-                // Add click handler for meeting URL if available
-                if let Some(meet_url) = &event.meeturl {
-                    let url = meet_url.clone();
-                    button.connect_clicked(move |_| {
-                        open_meeting(&url);
-                    });
-                }
-
+                let button = Self::create_event_button(&event, button_width, 40, false);
                 all_day_events_box.pack_start(&button, true, true, 0);
             }
 
@@ -323,54 +353,7 @@ impl TimelineView {
                 let height = (duration_minutes * HOUR_HEIGHT) / 60;
                 let x_position = spacing + (button_width + spacing) * index as i32;
 
-                // Create event button
-                let button = gtk::Button::new();
-                button.set_size_request(button_width, height.max(30));
-
-                // Style based on event status
-                let now = Local::now();
-                let style_context = button.style_context();
-                let color = if now >= event.start_timestamp && now <= event.end_timestamp {
-                    "rgba(100, 150, 255, 0.6)"  // Current - lighter blue
-                } else if now < event.start_timestamp {
-                    "rgba(150, 200, 150, 0.6)"  // Upcoming - lighter green
-                } else {
-                    "rgba(220, 220, 220, 0.6)"  // Past - lighter gray
-                };
-
-                let css = format!(
-                    "button {{ background: {}; border-radius: 4px; }}",
-                    color
-                );
-                let provider = gtk::CssProvider::new();
-                provider.load_from_data(css.as_bytes()).unwrap();
-                style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-
-                // Add event text
-                let time_str = format!(
-                    "{} - {}",
-                    event_start.format("%H:%M"),
-                    event_end.format("%H:%M")
-                );
-                let label = gtk::Label::new(Some(&format!("{}  {}{}", time_str, event.summary, if event.meeturl.is_some() { " 📹" } else { "" })));
-                label.set_line_wrap(true);
-                label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
-                label.set_justify(gtk::Justification::Left);
-                label.set_xalign(0.0);
-                label.set_margin_start(8);
-                label.set_margin_end(8);
-                label.set_margin_top(4);
-                label.set_margin_bottom(4);
-                button.add(&label);
-
-                // Add click handler for meeting URL if available
-                if let Some(meet_url) = &event.meeturl {
-                    let url = meet_url.clone();
-                    button.connect_clicked(move |_| {
-                        open_meeting(&url);
-                    });
-                }
-
+                let button = Self::create_event_button(event, button_width, height, true);
                 meeting_area.put(&button, x_position, y_position);
             }
         }
