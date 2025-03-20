@@ -143,7 +143,7 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
-const HOUR_HEIGHT: i32 = 60;  // Height for one hour
+const HOUR_HEIGHT: i32 = 80;  // Height for one hour
 
 struct TimelineView {
     container: gtk::Box,
@@ -158,9 +158,9 @@ impl TimelineView {
         let now = Local::now();
         let style_context = button.style_context();
         let color = if now >= event.start_timestamp && now <= event.end_timestamp {
-            "rgba(100, 150, 255, 0.6)"  // Current - lighter blue
+            "rgba(255, 165, 0, 0.6)"  // Current - orange
         } else if now < event.start_timestamp {
-            "rgba(150, 200, 150, 0.6)"  // Upcoming - lighter green
+            "rgba(150, 180, 255, 0.6)"  // Upcoming - lighter blue
         } else {
             "rgba(220, 220, 220, 0.6)"  // Past - lighter gray
         };
