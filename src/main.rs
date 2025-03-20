@@ -160,7 +160,7 @@ impl TimelineView {
         let color = if now >= event.start_timestamp && now <= event.end_timestamp {
             "rgba(255, 165, 0, 0.6)"  // Current - orange
         } else if now < event.start_timestamp {
-            "rgba(150, 180, 255, 0.6)"  // Upcoming - lighter blue
+            "rgba(180, 200, 255, 0.8)"  // Upcoming - muted blue with higher opacity
         } else {
             "rgba(220, 220, 220, 0.6)"  // Past - lighter gray
         };
