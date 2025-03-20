@@ -182,9 +182,9 @@ impl TimelineView {
                 event_start.format("%H:%M"),
                 event_end.format("%H:%M")
             );
-            format!("{}  {}{}", time_str, event.summary, if event.meeturl.is_some() { " 📹" } else { "" })
+            format!("{}  {}{}", time_str, event.summary, if event.meeturl.is_some() { " (Zoom)" } else { "" })
         } else {
-            format!("{}{}", event.summary, if event.meeturl.is_some() { " 📹" } else { "" })
+            format!("{}{}", event.summary, if event.meeturl.is_some() { " (Zoom)" } else { "" })
         };
 
         let label = gtk::Label::new(Some(&text));
