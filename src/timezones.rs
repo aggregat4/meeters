@@ -181,7 +181,7 @@ fn parse_occurrences_from_timespan(
         // See also https://icalendar.org/iCalendar-RFC-5545/3-6-5-time-zone-component.html
         let date_time_str = maybe_dtstart_prop.unwrap().value.as_ref().unwrap();
         match NaiveDateTime::parse_from_str(date_time_str, "%Y%m%dT%H%M%S") {
-            Ok(dt) => return Ok(vec![local_tz.from_local_datetime(&dt).unwrap()]),
+            Ok(dt) => Ok(vec![local_tz.from_local_datetime(&dt).unwrap()]),
             Err(e) => Err(CalendarError {
                 msg: format!(
                     "Could not parse DTSTART for timezone timespan with value {:?} and error: {:?}",
@@ -213,7 +213,7 @@ fn parse_timespansets(
     let transitions: Vec<TimezoneTransition> = vtimezone
         .transitions
         .iter()
-        .map(|vtimezone_transition| parse_icaltimezonetransition(vtimezone_transition))
+        .map(parse_icaltimezonetransition)
         .collect::<Result<Vec<TimezoneTransition>, CalendarError>>()?; // collect moves the result to the outer scope and doing '?' will fail the operation at the first Err
     assert_eq!(2, transitions.len());
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times

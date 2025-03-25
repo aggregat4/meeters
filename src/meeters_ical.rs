@@ -191,14 +191,14 @@ fn parse_event(
     local_tz: &Tz,
 ) -> Result<Event, CalendarError> {
     let summary = unescape_string(
-        &find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_else(|| "".to_string()),
+        &find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_default(),
     );
     let description = unescape_string(
         &find_property_value(&ical_event.properties, "DESCRIPTION")
-            .unwrap_or_else(|| "".to_string()),
+            .unwrap_or_default(),
     );
     let location = unescape_string(
-        &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_else(|| "".to_string()),
+        &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_default(),
     );
     // println!("Parsing event '{}'", summary);
     let (start_timestamp, end_timestamp, all_day) =

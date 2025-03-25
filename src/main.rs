@@ -35,7 +35,7 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
         .timeout_global(Some(Duration::from_secs(5)))
         .build();
     let agent: Agent = config.into();
-    return agent.get(url)
+    agent.get(url)
         .call()
         .map_err(|e| CalendarError {
             msg: format!("Error calling calendar URL: {}", e)
@@ -44,7 +44,7 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
         .read_to_string()
         .map_err(|e| CalendarError {
             msg: format!("Error reading calendar response body: {}", e)
-        });
+        })
 }
 
 fn has_icons(dir: &Path) -> bool {
@@ -106,9 +106,9 @@ fn set_no_meetings_left_icon(indicator: &mut libappindicator::AppIndicator) {
 fn get_icon_path_with_fallbak(icon_path: PathBuf, icon_filename: String) -> PathBuf {
     let nomeetingsleft_icon_path = icon_path.with_file_name(icon_filename);
     if !nomeetingsleft_icon_path.exists() {
-        return icon_path.with_file_name("meeters-appindicator.png");
+        icon_path.with_file_name("meeters-appindicator.png")
     } else {
-        return nomeetingsleft_icon_path;
+        nomeetingsleft_icon_path
     }
 }
 
@@ -620,10 +620,8 @@ fn show_event_notification(event: Event) {
                     open_meeting(meeting);
                 }
             });
-    } else {
-        if let Err(_) = notification.show() {
-            println!("Could not show notification");
-        }
+    } else if let Err(_) = notification.show() {
+        println!("Could not show notification");
     }
 }
 

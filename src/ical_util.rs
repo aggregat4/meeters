@@ -13,12 +13,7 @@ pub fn find_property_value(properties: &[Property], name: &str) -> Option<String
 }
 
 pub fn find_property<'a>(properties: &'a [Property], name: &str) -> Option<&'a Property> {
-    for property in properties {
-        if property.name == name {
-            return Some(property);
-        }
-    }
-    None
+    properties.iter().find(|&property| property.name == name)
 }
 
 pub fn find_param<'a>(params: &'a [(String, Vec<String>)], name: &str) -> Option<&'a [String]> {
@@ -49,30 +44,30 @@ pub fn params_to_string(params: &[(String, Vec<String>)]) -> String {
     if params.is_empty() {
         "".to_string()
     } else {
-        return format!(
+        format!(
             ";{}",
             params
                 .iter()
                 .map(|param| format!("{}={}", param.0, format_param_values(&param.1)))
                 .collect::<Vec<String>>()
                 .join(",")
-        );
+        )
     }
 }
 
 pub fn prop_to_string(prop: &Property) -> String {
-    return format!(
+    format!(
         "{}{}:{}",
         prop.name,
         params_to_string(prop.params.as_ref().unwrap_or(&vec![])),
         prop.value.as_ref().unwrap_or(&"".to_string())
-    );
+    )
 }
 
 pub fn properties_to_string(properties: &[Property]) -> String {
     properties
         .iter() // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
-        .map(|p| prop_to_string(p))
+        .map(prop_to_string)
         .collect::<Vec<String>>()
         .join("\n")
 }
