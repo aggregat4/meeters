@@ -10,8 +10,6 @@ use gtk::Menu;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
 use notify_rust::Notification;
 use ureq::Agent;
-// use gtk::DrawingArea;  // Unused import
-// use gtk::cairo;        // Unused import
 
 use crate::domain::Event;
 use crate::CalendarMessages::{EventNotification, TodayEvents};
