@@ -7,7 +7,7 @@ This is a graphical (GTK) utility for Linux that lives in the tray as an app ind
 
 # Installation
 
-You can drop the meeters binary anywhere. The tarball includes 2 icons that will be used when they are located next to the meeters binary. If not the program will default to a "new appointment" icon.
+You can drop the meeters binary anywhere. The tarball includes a few (optional) icons that will be used when they are located next to the meeters binary. If not the program will default to a "new appointment" icon.
 
 # Configuration
 
@@ -31,21 +31,12 @@ The following properties are supported:
 | MEETERS_POLLING_INTERVAL_MS | no | 120000 | The time in milliseconds between two fetches of the ical calendar. |
 | MEETERS_EVENT_WARNING_TIME_SECONDS | no | 60 | The time in seconds before the next meeting to show the notification. |
 
-# Troubleshooting
-
-## `thread 'main' panicked at 'Failed to load ayatana-appindicator3 or appindicator3 dynamic library`
-
-If you get an error regarding a missing appindicator library, you need to install it first. On Arch Linux this is done with:
-
-```
-sudo pacman -S libappindicator-gtk3
-```
 
 # D-Bus Interface
 
 meeters exposes a D-Bus interface that allows you to control the window state programmatically. The service name is `net.aggregat4.Meeters` and the object path is `/net/aggregat4/Meeters`.
 
-## Available Commands
+## Available D-Bus Commands
 
 ### ShowWindow
 Opens the meetings window if it's closed or creates it if it doesn't exist.
@@ -67,3 +58,9 @@ Toggles the window state - opens it if it's closed or closes it if it's open.
 ```bash
 dbus-send --session --dest=net.aggregat4.Meeters --type=method_call /net/aggregat4/Meeters net.aggregat4.Meeters.ToggleWindow
 ```
+
+# Troubleshooting
+
+| Error | Solution |
+|-------|----------|
+| `thread 'main' panicked at 'Failed to load ayatana-appindicator3 or appindicator3 dynamic library'` | Install the required appindicator library. On Arch Linux, run: `sudo pacman -S libappindicator-gtk3` |
