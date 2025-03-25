@@ -9,7 +9,10 @@ lazy_static! {
 }
 
 fn read_windows_zones() -> HashMap<String, Tz> {
-	let doc = roxmltree::Document::parse(WINDOWS_ZONES).unwrap();
+	let doc = roxmltree::Document::parse_with_options(WINDOWS_ZONES, roxmltree::ParsingOptions {
+		allow_dtd: true,
+		..Default::default()
+	}).unwrap();
 	let mut tzmap: HashMap<String, Tz> = HashMap::new();
 	doc.descendants()
 		.filter(|n| {
