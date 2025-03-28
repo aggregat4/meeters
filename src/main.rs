@@ -35,15 +35,16 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
         .timeout_global(Some(Duration::from_secs(5)))
         .build();
     let agent: Agent = config.into();
-    agent.get(url)
+    agent
+        .get(url)
         .call()
         .map_err(|e| CalendarError {
-            msg: format!("Error calling calendar URL: {}", e)
+            msg: format!("Error calling calendar URL: {}", e),
         })?
         .body_mut()
         .read_to_string()
         .map_err(|e| CalendarError {
-            msg: format!("Error reading calendar response body: {}", e)
+            msg: format!("Error reading calendar response body: {}", e),
         })
 }
 
@@ -141,7 +142,7 @@ fn open_meeting(meet_url: &str) {
     }
 }
 
-const HOUR_HEIGHT: i32 = 80;  // Height for one hour
+const HOUR_HEIGHT: i32 = 80; // Height for one hour
 
 struct TimelineView {
     container: gtk::Box,
@@ -152,21 +153,24 @@ impl TimelineView {
         let button = gtk::Button::new();
         button.set_size_request(width, height.max(30));
 
+        // Add tooltip with event description
+        let trimmed_description = event.description.trim();
+        if !trimmed_description.is_empty() {
+            button.set_tooltip_text(Some(trimmed_description));
+        }
+
         // Style based on event status
         let now = Local::now();
         let style_context = button.style_context();
         let color = if now >= event.start_timestamp && now <= event.end_timestamp {
-            "rgba(255, 165, 0, 0.6)"  // Current - orange
+            "rgba(255, 165, 0, 0.6)" // Current - orange
         } else if now < event.start_timestamp {
-            "rgba(180, 200, 255, 0.8)"  // Upcoming - muted blue with higher opacity
+            "rgba(180, 200, 255, 0.8)" // Upcoming - muted blue with higher opacity
         } else {
-            "rgba(220, 220, 220, 0.6)"  // Past - lighter gray
+            "rgba(220, 220, 220, 0.6)" // Past - lighter gray
         };
 
-        let css = format!(
-            "button {{ background: {}; border-radius: 4px; }}",
-            color
-        );
+        let css = format!("button {{ background: {}; border-radius: 4px; }}", color);
         let provider = gtk::CssProvider::new();
         provider.load_from_data(css.as_bytes()).unwrap();
         style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -180,9 +184,26 @@ impl TimelineView {
                 event_start.format("%H:%M"),
                 event_end.format("%H:%M")
             );
-            format!("{}  {}{}", time_str, event.summary, if event.meeturl.is_some() { " (Zoom)" } else { "" })
+            format!(
+                "{}  {}{}",
+                time_str,
+                event.summary,
+                if event.meeturl.is_some() {
+                    " (Zoom)"
+                } else {
+                    ""
+                }
+            )
         } else {
-            format!("{}{}", event.summary, if event.meeturl.is_some() { " (Zoom)" } else { "" })
+            format!(
+                "{}{}",
+                event.summary,
+                if event.meeturl.is_some() {
+                    " (Zoom)"
+                } else {
+                    ""
+                }
+            )
         };
 
         let label = gtk::Label::new(Some(&text));
@@ -232,11 +253,13 @@ impl TimelineView {
 
             // Create horizontal box for all-day events
             let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            
+
             // Calculate button width based on number of events
             let available_width = 600; // Match the timeline width
-            let button_width = ((available_width - (6 * (all_day_events.len() as i32 + 1))) / all_day_events.len() as i32).max(150);
-            
+            let button_width = ((available_width - (6 * (all_day_events.len() as i32 + 1)))
+                / all_day_events.len() as i32)
+                .max(150);
+
             for event in all_day_events {
                 let button = Self::create_event_button(&event, button_width, 40, false);
                 all_day_events_box.pack_start(&button, true, true, 0);
@@ -256,14 +279,14 @@ impl TimelineView {
         // Time labels column and meeting area (both using Fixed for exact positioning)
         let time_column = gtk::Fixed::new();
         time_column.set_size_request(time_label_width, -1);
-        
+
         let meeting_area = gtk::Fixed::new();
         meeting_area.set_hexpand(true);
 
         // Add hour markers and grid lines
         for hour in start_hour..=end_hour {
             let y_position = (hour - start_hour) * HOUR_HEIGHT;
-            
+
             // Hour label
             let label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
             label.set_xalign(1.0);
@@ -274,18 +297,18 @@ impl TimelineView {
             let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             separator.set_size_request(600, -1); // Explicit width, slightly less than window width
             let style_context = separator.style_context();
-            
+
             // Different styles for start/end of day vs regular hours
             let css = if hour == start_hour || hour == end_hour {
                 "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; margin: 0; padding: 0; }"
             } else {
                 "box { background-color: rgba(200, 200, 200, 0.3); min-height: 1px; margin: 0; padding: 0; }"
             };
-            
+
             let provider = gtk::CssProvider::new();
             provider.load_from_data(css.as_bytes()).unwrap();
             style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-            
+
             meeting_area.put(&separator, 0, y_position);
         }
 
@@ -296,7 +319,7 @@ impl TimelineView {
         if current_hour >= start_hour && current_hour <= end_hour {
             let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
             let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
-            
+
             let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             current_time_marker.set_size_request(600, -1); // Match separator width
             let style_context = current_time_marker.style_context();
@@ -305,7 +328,7 @@ impl TimelineView {
                 .load_from_data(b"box { background-color: rgba(255, 0, 0, 0.6); min-height: 2px; margin: 0; padding: 0; }")
                 .unwrap();
             style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-            
+
             meeting_area.put(&current_time_marker, 0, y_position);
         }
 
@@ -315,17 +338,17 @@ impl TimelineView {
             let mut found_group = false;
             for group in &mut event_groups {
                 let overlaps = group.iter().any(|existing| {
-                    !(event.end_timestamp <= existing.start_timestamp || 
-                      event.start_timestamp >= existing.end_timestamp)
+                    !(event.end_timestamp <= existing.start_timestamp
+                        || event.start_timestamp >= existing.end_timestamp)
                 });
-                
+
                 if overlaps {
                     group.push(event);
                     found_group = true;
                     break;
                 }
             }
-            
+
             if !found_group {
                 event_groups.push(vec![event]);
             }
@@ -335,16 +358,19 @@ impl TimelineView {
         for group in event_groups {
             let group_size = group.len() as i32;
             let available_width = 600; // Will be adjusted based on actual width
-            let button_width = ((available_width - (spacing * (group_size + 1))) / group_size).max(200);
+            let button_width =
+                ((available_width - (spacing * (group_size + 1))) / group_size).max(200);
 
             for (index, event) in group.iter().enumerate() {
                 let event_start = event.start_timestamp.with_timezone(&Local);
                 let event_end = event.end_timestamp.with_timezone(&Local);
-                
+
                 // Calculate position
-                let start_minutes = (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
-                let duration_minutes = event_end.signed_duration_since(event_start).num_minutes() as i32;
-                
+                let start_minutes =
+                    (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
+                let duration_minutes =
+                    event_end.signed_duration_since(event_start).num_minutes() as i32;
+
                 let y_position = (start_minutes * HOUR_HEIGHT) / 60;
                 let height = (duration_minutes * HOUR_HEIGHT) / 60;
                 let x_position = spacing + (button_width + spacing) * index as i32;
@@ -363,7 +389,8 @@ impl TimelineView {
         layout_box.set_size_request(-1, total_height);
 
         // Add to scrolled window
-        let scrolled_window = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        let scrolled_window =
+            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
         scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         scrolled_window.add(&layout_box);
         container.pack_start(&scrolled_window, true, true, 0);
@@ -371,7 +398,6 @@ impl TimelineView {
         Self { container }
     }
 }
-
 
 fn calculate_window_height(start_hour: i32, end_hour: i32) -> i32 {
     // Constants for calculating window size
@@ -409,14 +435,14 @@ impl WindowManager {
 
     fn show_window(&mut self) {
         let events = self.events.lock().unwrap();
-        
+
         if let Some(window) = &self.current_window {
             if window.is_visible() {
                 window.present();
                 return;
             }
         }
-        
+
         // Create new window
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         window.set_title("Today's Meetings");
@@ -433,14 +459,14 @@ impl WindowManager {
         main_box.pack_start(&timeline.container, true, true, 0);
 
         window.add(&main_box);
-        
+
         // Handle window close
         let window_clone = window.clone();
         window.connect_delete_event(move |_, _| {
             window_clone.hide();
             glib::Propagation::Stop
         });
-        
+
         window.show_all();
         self.current_window = Some(window);
     }
@@ -449,23 +475,29 @@ impl WindowManager {
         // Update stored events
         let mut events = self.events.lock().unwrap();
         *events = new_events;
-        
+
         // Update window if it exists
         if let Some(window) = &self.current_window {
             if let Some(main_box) = window.children().first() {
                 let main_box = main_box.clone().downcast::<gtk::Box>().unwrap();
-                main_box.children().iter().for_each(|child| main_box.remove(child));
-                
+                main_box
+                    .children()
+                    .iter()
+                    .for_each(|child| main_box.remove(child));
+
                 let timeline = TimelineView::new(events.to_vec(), self.start_hour, self.end_hour);
                 main_box.pack_start(&timeline.container, true, true, 0);
                 main_box.show_all();
             }
         }
     }
-
 }
 
-fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator, window_manager: Arc<Mutex<WindowManager>>) {
+fn create_indicator_menu(
+    events: &[domain::Event],
+    indicator: &mut AppIndicator,
+    window_manager: Arc<Mutex<WindowManager>>,
+) {
     let mut m: Menu = gtk::Menu::new();
     let mut nof_upcoming_meetings = 0;
     if events.is_empty() {
@@ -519,7 +551,7 @@ fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator,
             m.append(&item);
         }
     }
-    
+
     // Add "Show Meetings Window" option
     let show_window_item = gtk::MenuItem::with_label("Show Meetings Window");
     let window_manager_clone = Arc::clone(&window_manager);
@@ -529,7 +561,7 @@ fn create_indicator_menu(events: &[domain::Event], indicator: &mut AppIndicator,
     });
     m.append(&gtk::SeparatorMenuItem::new());
     m.append(&show_window_item);
-    
+
     let mi = gtk::MenuItem::with_label("Quit");
     mi.connect_activate(|_| {
         gtk::main_quit();
@@ -647,7 +679,7 @@ fn default_tz(_: dotenvy::Error) -> Result<String, dotenvy::Error> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     load_config()?;
-    
+
     // Parse config
     let local_tz_iana: String = dotenvy::var("MEETERS_LOCAL_TIMEZONE")
         .or_else(default_tz)
@@ -681,33 +713,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("Local Timezone configured as {}", local_tz_iana.clone());
 
-
     // Set up D-Bus connection
-    let connection = Connection::new_session().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    connection.request_name("net.aggregat4.Meeters", false, true, false)
+    let connection =
+        Connection::new_session().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    connection
+        .request_name("net.aggregat4.Meeters", false, true, false)
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
     // Create window manager
-    let window_manager = Arc::new(Mutex::new(WindowManager::new(config_start_hour, config_end_hour)));
-    
+    let window_manager = Arc::new(Mutex::new(WindowManager::new(
+        config_start_hour,
+        config_end_hour,
+    )));
+
     // Create a channel for D-Bus requests
     let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::Priority::DEFAULT);
-    
+
     // Create D-Bus interface
     let mut cr = Crossroads::new();
-    
+
     let iface_token = {
         let show_sender = dbus_sender.clone();
         let close_sender = dbus_sender.clone();
         let toggle_sender = dbus_sender.clone();
-        
+
         cr.register("net.aggregat4.Meeters", move |b| {
             let show_sender = show_sender.clone();
             b.method("ShowWindow", (), (), move |_, _, ()| {
                 show_sender.send(("show", ())).unwrap();
                 Ok(())
             });
-            
+
             let close_sender = close_sender.clone();
             b.method("CloseWindow", (), (), move |_, _, ()| {
                 close_sender.send(("close", ())).unwrap();
@@ -721,9 +757,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         })
     };
-    
+
     cr.insert("/net/aggregat4/Meeters", &[iface_token], ());
-    
+
     // Handle D-Bus requests in the main GTK thread
     let window_manager_clone = Arc::clone(&window_manager);
     dbus_receiver.attach(None, move |(action, _)| {
@@ -734,19 +770,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(window) = &wm.current_window {
                     window.hide();
                 }
-            },
+            }
             "toggle" => wm.toggle_window(),
             _ => (),
         }
         glib::ControlFlow::Continue
     });
-    
+
     // Spawn D-Bus handler thread
     let cr_clone = cr;
     thread::spawn(move || {
         cr_clone.serve(&connection).unwrap();
     });
-
 
     // magic incantation for gtk
     gtk::init().unwrap();
@@ -774,7 +809,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Update window manager with new events
                 let mut wm = window_manager.lock().unwrap();
                 wm.update_events(events.clone());
-                
+
                 if events.is_empty() {
                     create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
                 } else {
