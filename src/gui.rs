@@ -1,8 +1,11 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use chrono::prelude::*;
+use dbus::blocking::Connection;
+use dbus_crossroads::Crossroads;
 use directories::ProjectDirs;
 use gtk::prelude::*;
 use gtk::Menu;
@@ -587,4 +590,91 @@ fn get_config_directory() -> PathBuf {
         .expect("Project directory must be available")
         .config_dir()
         .to_path_buf()
+}
+
+pub fn initialize_gui(
+    config_start_hour: i32,
+    config_end_hour: i32,
+) -> (AppIndicator, Arc<Mutex<WindowManager>>) {
+    // Initialize GTK
+    gtk::init().unwrap();
+
+    // Create window manager
+    let window_manager = Arc::new(Mutex::new(WindowManager::new(
+        config_start_hour,
+        config_end_hour,
+    )));
+
+    // Set up D-Bus connection
+    let connection = Connection::new_session().expect("Failed to connect to D-Bus");
+    connection
+        .request_name("net.aggregat4.Meeters", false, true, false)
+        .expect("Failed to request D-Bus name");
+
+    // Create a channel for D-Bus requests
+    let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::Priority::DEFAULT);
+
+    // Create D-Bus interface
+    let mut cr = Crossroads::new();
+
+    let iface_token = {
+        let show_sender = dbus_sender.clone();
+        let close_sender = dbus_sender.clone();
+        let toggle_sender = dbus_sender.clone();
+
+        cr.register("net.aggregat4.Meeters", move |b| {
+            let show_sender = show_sender.clone();
+            b.method("ShowWindow", (), (), move |_, _, ()| {
+                show_sender.send(("show", ())).unwrap();
+                Ok(())
+            });
+
+            let close_sender = close_sender.clone();
+            b.method("CloseWindow", (), (), move |_, _, ()| {
+                close_sender.send(("close", ())).unwrap();
+                Ok(())
+            });
+
+            let toggle_sender = toggle_sender.clone();
+            b.method("ToggleWindow", (), (), move |_, _, ()| {
+                toggle_sender.send(("toggle", ())).unwrap();
+                Ok(())
+            });
+        })
+    };
+
+    cr.insert("/net/aggregat4/Meeters", &[iface_token], ());
+
+    // Handle D-Bus requests in the main GTK thread
+    let window_manager_clone = Arc::clone(&window_manager);
+    dbus_receiver.attach(None, move |(action, _)| {
+        let mut wm = window_manager_clone.lock().unwrap();
+        match action {
+            "show" => wm.show_window(),
+            "close" => {
+                if let Some(window) = &wm.current_window {
+                    window.hide();
+                }
+            }
+            "toggle" => wm.toggle_window(),
+            _ => (),
+        }
+        glib::ControlFlow::Continue
+    });
+
+    // Spawn D-Bus handler thread
+    let cr_clone = cr;
+    thread::spawn(move || {
+        cr_clone.serve(&connection).unwrap();
+    });
+
+    // Create indicator
+    let mut indicator = create_indicator();
+    create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
+
+    (indicator, window_manager)
+}
+
+pub fn run_gui_main_loop() {
+    gtk::main();
 }

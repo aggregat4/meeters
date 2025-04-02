@@ -4,8 +4,6 @@ use std::thread;
 use chrono::prelude::*;
 use chrono_tz::Tz;
 use directories::ProjectDirs;
-use gtk::prelude::*;
-use notify_rust::Notification;
 use ureq::Agent;
 
 use crate::domain::Event;
@@ -22,10 +20,7 @@ mod meeters_ical;
 mod timezones;
 mod windows_timezones;
 
-use dbus::blocking::Connection;
-use dbus_crossroads::Crossroads;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
     println!("trying to fetch ical");
@@ -137,91 +132,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("Local Timezone configured as {}", local_tz_iana.clone());
 
-    // Set up D-Bus connection
-    let connection =
-        Connection::new_session().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    connection
-        .request_name("net.aggregat4.Meeters", false, true, false)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-    // Create window manager
-    let window_manager = Arc::new(Mutex::new(gui::WindowManager::new(
-        config_start_hour,
-        config_end_hour,
-    )));
-
-    // Create a channel for D-Bus requests
-    let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::Priority::DEFAULT);
-
-    // Create D-Bus interface
-    let mut cr = Crossroads::new();
-
-    let iface_token = {
-        let show_sender = dbus_sender.clone();
-        let close_sender = dbus_sender.clone();
-        let toggle_sender = dbus_sender.clone();
-
-        cr.register("net.aggregat4.Meeters", move |b| {
-            let show_sender = show_sender.clone();
-            b.method("ShowWindow", (), (), move |_, _, ()| {
-                show_sender.send(("show", ())).unwrap();
-                Ok(())
-            });
-
-            let close_sender = close_sender.clone();
-            b.method("CloseWindow", (), (), move |_, _, ()| {
-                close_sender.send(("close", ())).unwrap();
-                Ok(())
-            });
-
-            let toggle_sender = toggle_sender.clone();
-            b.method("ToggleWindow", (), (), move |_, _, ()| {
-                toggle_sender.send(("toggle", ())).unwrap();
-                Ok(())
-            });
-        })
-    };
-
-    cr.insert("/net/aggregat4/Meeters", &[iface_token], ());
-
-    // Handle D-Bus requests in the main GTK thread
-    let window_manager_clone = Arc::clone(&window_manager);
-    dbus_receiver.attach(None, move |(action, _)| {
-        let mut wm = window_manager_clone.lock().unwrap();
-        match action {
-            "show" => wm.show_window(),
-            "close" => {
-                if let Some(window) = &wm.current_window {
-                    window.hide();
-                }
-            }
-            "toggle" => wm.toggle_window(),
-            _ => (),
-        }
-        glib::ControlFlow::Continue
-    });
-
-    // Spawn D-Bus handler thread
-    let cr_clone = cr;
-    thread::spawn(move || {
-        cr_clone.serve(&connection).unwrap();
-    });
-
-    // magic incantation for gtk
-    gtk::init().unwrap();
-    // I can't get styles to work in appindicators
-    // // Futzing with styles
-    // let style = "label { color: red; }";
-    // let provider = CssProvider::new();
-    // provider.load_from_data(style.as_ref()).unwrap();
-    // gtk::StyleContext::add_provider_for_screen(
-    //     &gdk::Screen::get_default().expect("Error initializing gtk css provider."),
-    //     &provider,
-    //     gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    // );
-    // set up our widgets
-    let mut indicator = gui::create_indicator();
-    gui::create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
+    // Initialize GUI components
+    let (mut indicator, window_manager) = gui::initialize_gui(config_start_hour, config_end_hour);
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (events_sender, events_receiver) =
@@ -252,6 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         glib::ControlFlow::Continue
     });
+
     // start the background thread for calendar work
     // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
     // (it requires static for the status_sender and I can't make that work yet)
@@ -273,13 +186,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());
-                        let local_date = Local::now().date();
+                        let local_date = Local::now().date_naive();
                         let today_start = local_tz
-                            .ymd(local_date.year(), local_date.month(), local_date.day())
-                            .and_hms(0, 0, 0);
+                            .with_ymd_and_hms(
+                                local_date.year(),
+                                local_date.month(),
+                                local_date.day(),
+                                0,
+                                0,
+                                0,
+                            )
+                            .unwrap();
                         let today_end = local_tz
-                            .ymd(local_date.year(), local_date.month(), local_date.day())
-                            .and_hms(23, 59, 59);
+                            .with_ymd_and_hms(
+                                local_date.year(),
+                                local_date.month(),
+                                local_date.day(),
+                                23,
+                                59,
+                                59,
+                            )
+                            .unwrap();
                         let today_events = get_events_for_interval(events, today_start, today_end);
                         println!(
                             "There are {} events for today: {:?}",
@@ -322,7 +249,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             thread::sleep(std::time::Duration::from_secs(5));
         }
     });
-    // start listening for messages
-    gtk::main();
+
+    // Run the GUI main loop
+    gui::run_gui_main_loop();
     Ok(())
 }
