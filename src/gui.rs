@@ -212,7 +212,7 @@ impl TimelineView {
         let all_day_label = gtk::Label::new(Some("All Day"));
         all_day_label.set_xalign(0.0);
         all_day_label.set_margin_bottom(4);
-        all_day_label.set_markup("<b>All Day</b>");
+        all_day_label.set_markup("All Day");
         all_day_container.pack_start(&all_day_label, false, false, 0);
 
         // Create horizontal box for all-day events
