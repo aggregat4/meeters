@@ -536,116 +536,55 @@ pub fn create_indicator_menu(
     let mut m: Menu = gtk::Menu::new();
     let mut nof_upcoming_meetings = 0;
 
-    // Add today's events
-    if today_events.is_empty() && tomorrow_events.is_empty() {
+    if today_events.is_empty() {
         let item = gtk::MenuItem::with_label("test");
         let label = item.child().unwrap();
         (label.downcast::<gtk::Label>())
             .unwrap()
-            .set_markup("<b>No Events Today or Tomorrow</b>");
+            .set_markup("<b>No Events Today</b>");
         m.append(&item);
     } else {
-        // Add today's events
-        if !today_events.is_empty() {
-            let today_header = gtk::MenuItem::with_label("test");
-            let today_label = today_header.child().unwrap();
-            (today_label.downcast::<gtk::Label>())
-                .unwrap()
-                .set_markup("<b>Today</b>");
-            m.append(&today_header);
+        for event in today_events {
+            let all_day = event.start_timestamp.time() == event.end_timestamp.time();
+            let time_string = if all_day {
+                "All Day".to_owned()
+            } else {
+                format!(
+                    "{} - {}",
+                    &event.start_timestamp.format("%H:%M"),
+                    &event.end_timestamp.format("%H:%M")
+                )
+                .to_owned()
+            };
+            let meeturl_string = match &event.meeturl {
+                Some(_) => " (Zoom)",
+                None => "",
+            };
 
-            for event in today_events {
-                let all_day = event.start_timestamp.time() == event.end_timestamp.time();
-                let time_string = if all_day {
-                    "All Day".to_owned()
-                } else {
-                    format!(
-                        "{} - {}",
-                        &event.start_timestamp.format("%H:%M"),
-                        &event.end_timestamp.format("%H:%M")
-                    )
-                    .to_owned()
-                };
-                let meeturl_string = match &event.meeturl {
-                    Some(_) => " (Zoom)",
-                    None => "",
-                };
+            let item = gtk::MenuItem::with_label("Test");
+            let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
+            let now = Local::now();
+            let label_string = if all_day {
+                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
+            } else if now < event.start_timestamp {
+                nof_upcoming_meetings += 1;
+                format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
+            } else if now >= event.start_timestamp && now <= event.end_timestamp {
+                nof_upcoming_meetings += 1;
+                format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
+            } else {
+                format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
+            };
 
-                let item = gtk::MenuItem::with_label("Test");
-                let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
-                let now = Local::now();
-                let label_string = if all_day {
-                    format!("{}: {}{}", time_string, &event.summary, meeturl_string)
-                } else if now < event.start_timestamp {
-                    nof_upcoming_meetings += 1;
-                    format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
-                } else if now >= event.start_timestamp && now <= event.end_timestamp {
-                    nof_upcoming_meetings += 1;
-                    format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
-                } else {
-                    format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
-                };
-
-                label.set_text(&label_string);
-                let new_event = (*event).clone();
-                if new_event.meeturl.is_some() {
-                    item.connect_activate(move |_| {
-                        let meet_url = &new_event.meeturl.as_ref().unwrap();
-                        open_meeting(meet_url);
-                    });
-                }
-                m.append(&item);
+            label.set_text(&label_string);
+            let new_event = (*event).clone();
+            if new_event.meeturl.is_some() {
+                item.connect_activate(move |_| {
+                    let meet_url = &new_event.meeturl.as_ref().unwrap();
+                    open_meeting(meet_url);
+                });
             }
-        }
-
-        // Add tomorrow's events
-        if !tomorrow_events.is_empty() {
-            m.append(&gtk::SeparatorMenuItem::new());
-
-            let tomorrow_header = gtk::MenuItem::with_label("test");
-            let tomorrow_label = tomorrow_header.child().unwrap();
-            (tomorrow_label.downcast::<gtk::Label>())
-                .unwrap()
-                .set_markup("<b>Tomorrow</b>");
-            m.append(&tomorrow_header);
-
-            for event in tomorrow_events {
-                let all_day = event.start_timestamp.time() == event.end_timestamp.time();
-                let time_string = if all_day {
-                    "All Day".to_owned()
-                } else {
-                    format!(
-                        "{} - {}",
-                        &event.start_timestamp.format("%H:%M"),
-                        &event.end_timestamp.format("%H:%M")
-                    )
-                    .to_owned()
-                };
-                let meeturl_string = match &event.meeturl {
-                    Some(_) => " (Zoom)",
-                    None => "",
-                };
-
-                let item = gtk::MenuItem::with_label("Test");
-                let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
-                let now = Local::now();
-                let label_string = if all_day {
-                    format!("{}: {}{}", time_string, &event.summary, meeturl_string)
-                } else {
-                    nof_upcoming_meetings += 1;
-                    format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
-                };
-
-                label.set_text(&label_string);
-                let new_event = (*event).clone();
-                if new_event.meeturl.is_some() {
-                    item.connect_activate(move |_| {
-                        let meet_url = &new_event.meeturl.as_ref().unwrap();
-                        open_meeting(meet_url);
-                    });
-                }
-                m.append(&item);
-            }
+            m.append(&item);
         }
     }
 
