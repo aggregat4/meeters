@@ -7,7 +7,7 @@ use directories::ProjectDirs;
 use ureq::Agent;
 
 use crate::domain::Event;
-use crate::CalendarMessages::{EventNotification, TodayEvents};
+use crate::CalendarMessages::{DayEvents, EventNotification};
 use domain::CalendarError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -86,9 +86,11 @@ const DEFAULT_EVENT_WARNING_TIME_SECONDS: i64 = 60;
 const DEFAULT_START_HOUR: i32 = 8;
 /// Default end hour for the timeline view (8 PM)
 const DEFAULT_END_HOUR: i32 = 20;
+/// Default number of future days to show (1 = today + tomorrow)
+const DEFAULT_FUTURE_DAYS: i32 = 1;
 
 enum CalendarMessages {
-    TodayEvents(Vec<Event>, Vec<Event>), // (today_events, tomorrow_events)
+    DayEvents(Vec<Vec<Event>>), // Vector of events for each day
     EventNotification(Event),
 }
 
@@ -130,36 +132,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(val) => val.parse::<i32>().expect("MEETERS_TODAY_END_HOUR defines the end hour of the today view, must be a positive integer between 0 and 23"),
         Err(_) => DEFAULT_END_HOUR
     };
+    let config_future_days: i32 = match dotenvy::var("MEETERS_FUTURE_DAYS") {
+        Ok(val) => val.parse::<i32>().expect("MEETERS_FUTURE_DAYS defines the number of future days to show in addition to today, must be a positive integer"),
+        Err(_) => DEFAULT_FUTURE_DAYS
+    };
     println!("Local Timezone configured as {}", local_tz_iana.clone());
 
     // Initialize GUI components
-    let (mut indicator, window_manager) = gui::initialize_gui(config_start_hour, config_end_hour);
+    let (mut indicator, window_manager) =
+        gui::initialize_gui(config_start_hour, config_end_hour, config_future_days);
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (events_sender, events_receiver) =
         glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::Priority::DEFAULT);
     events_receiver.attach(None, move |event_result| {
         match event_result {
-            Ok(TodayEvents(today_events, tomorrow_events)) => {
+            Ok(DayEvents(day_events)) => {
                 // Update window manager with new events
                 let mut wm = window_manager.lock().unwrap();
-                wm.update_events(today_events.clone(), tomorrow_events.clone());
+                wm.update_events(day_events.clone());
 
-                if today_events.is_empty() && tomorrow_events.is_empty() {
-                    gui::create_indicator_menu(
-                        &[],
-                        &[],
-                        &mut indicator,
-                        Arc::clone(&window_manager),
-                    );
-                } else {
-                    gui::create_indicator_menu(
-                        &today_events,
-                        &tomorrow_events,
-                        &mut indicator,
-                        Arc::clone(&window_manager),
-                    );
-                }
+                // Only show today's events in the indicator menu
+                let empty_events = Vec::new();
+                let today_events = day_events.first().unwrap_or(&empty_events);
+                gui::create_indicator_menu(
+                    today_events,
+                    &mut indicator,
+                    Arc::clone(&window_manager),
+                );
             }
             Ok(EventNotification(event)) => {
                 if config_show_event_notification {
@@ -172,8 +172,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // start the background thread for calendar work
-    // this thread spawn here is inline because if I use another method I have trouble matching the lifetimes
-    // (it requires static for the status_sender and I can't make that work yet)
     thread::spawn(move || {
         let mut last_download_time = 0;
         let mut last_events: Vec<Event> = vec![];
@@ -194,71 +192,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("Successfully got {:?} events", events.len());
                         let local_date = Local::now().date_naive();
 
-                        // Today's events
-                        let today_start = local_tz
-                            .with_ymd_and_hms(
-                                local_date.year(),
-                                local_date.month(),
-                                local_date.day(),
-                                0,
-                                0,
-                                0,
-                            )
-                            .unwrap();
-                        let today_end = local_tz
-                            .with_ymd_and_hms(
-                                local_date.year(),
-                                local_date.month(),
-                                local_date.day(),
-                                23,
-                                59,
-                                59,
-                            )
-                            .unwrap();
-                        let today_events =
-                            get_events_for_interval(events.clone(), today_start, today_end);
-                        println!(
-                            "There are {} events for today: {:?}",
-                            today_events.len(),
-                            today_events
-                        );
+                        // Get events for each day
+                        let mut day_events = Vec::new();
 
-                        // Tomorrow's events
-                        let tomorrow_date = local_date + chrono::Duration::days(1);
-                        let tomorrow_start = local_tz
-                            .with_ymd_and_hms(
-                                tomorrow_date.year(),
-                                tomorrow_date.month(),
-                                tomorrow_date.day(),
-                                0,
-                                0,
-                                0,
-                            )
-                            .unwrap();
-                        let tomorrow_end = local_tz
-                            .with_ymd_and_hms(
-                                tomorrow_date.year(),
-                                tomorrow_date.month(),
-                                tomorrow_date.day(),
-                                23,
-                                59,
-                                59,
-                            )
-                            .unwrap();
-                        let tomorrow_events =
-                            get_events_for_interval(events, tomorrow_start, tomorrow_end);
-                        println!(
-                            "There are {} events for tomorrow: {:?}",
-                            tomorrow_events.len(),
-                            tomorrow_events
-                        );
+                        // Process each day
+                        for day_offset in 0..=config_future_days {
+                            let day_date = local_date + chrono::Duration::days(day_offset as i64);
+                            let day_start = local_tz
+                                .with_ymd_and_hms(
+                                    day_date.year(),
+                                    day_date.month(),
+                                    day_date.day(),
+                                    0,
+                                    0,
+                                    0,
+                                )
+                                .unwrap();
+                            let day_end = local_tz
+                                .with_ymd_and_hms(
+                                    day_date.year(),
+                                    day_date.month(),
+                                    day_date.day(),
+                                    23,
+                                    59,
+                                    59,
+                                )
+                                .unwrap();
+                            let day_events_list =
+                                get_events_for_interval(events.clone(), day_start, day_end);
+                            println!(
+                                "There are {} events for day {}: {:?}",
+                                day_events_list.len(),
+                                day_offset,
+                                day_events_list
+                            );
+                            day_events.push(day_events_list);
+                        }
 
-                        // Combine today's and tomorrow's events for notifications
-                        last_events = today_events.clone();
-                        last_events.extend(tomorrow_events.clone());
+                        // Store today's events for notifications
+                        last_events = day_events[0].clone();
 
                         events_sender
-                            .send(Ok(TodayEvents(today_events, tomorrow_events)))
+                            .send(Ok(DayEvents(day_events)))
                             .expect("Channel should be sendable");
                     }
                     Err(e) => {

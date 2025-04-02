@@ -371,20 +371,20 @@ fn calculate_window_height(start_hour: i32, end_hour: i32) -> i32 {
 
 pub struct WindowManager {
     pub current_window: Option<gtk::Window>,
-    today_events: Arc<Mutex<Vec<Event>>>,
-    tomorrow_events: Arc<Mutex<Vec<Event>>>,
+    day_events: Arc<Mutex<Vec<Vec<Event>>>>,
     start_hour: i32,
     end_hour: i32,
+    future_days: i32,
 }
 
 impl WindowManager {
-    pub fn new(start_hour: i32, end_hour: i32) -> Self {
+    pub fn new(start_hour: i32, end_hour: i32, future_days: i32) -> Self {
         WindowManager {
             current_window: None,
-            today_events: Arc::new(Mutex::new(Vec::new())),
-            tomorrow_events: Arc::new(Mutex::new(Vec::new())),
+            day_events: Arc::new(Mutex::new(Vec::new())),
             start_hour,
             end_hour,
+            future_days,
         }
     }
 
@@ -401,8 +401,7 @@ impl WindowManager {
     }
 
     pub fn show_window(&mut self) {
-        let today_events = self.today_events.lock().unwrap();
-        let tomorrow_events = self.tomorrow_events.lock().unwrap();
+        let day_events = self.day_events.lock().unwrap();
 
         if let Some(window) = &self.current_window {
             if window.is_visible() {
@@ -413,9 +412,9 @@ impl WindowManager {
 
         // Create new window
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Today's and Tomorrow's Meetings");
+        window.set_title("Calendar View");
         window.set_default_size(
-            1400,
+            (700 * (self.future_days + 1)) as i32,
             calculate_window_height(self.start_hour, self.end_hour),
         );
 
@@ -425,41 +424,42 @@ impl WindowManager {
         main_box.set_margin_top(6);
         main_box.set_margin_bottom(6);
 
-        // Create a scrolled window that will contain both days
+        // Create a scrolled window that will contain all days
         let scrolled_window =
             gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
         scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
 
-        // Create horizontal box for today and tomorrow
+        // Create horizontal box for all days
         let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
 
-        // Add today's timeline
-        let today_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let today_label = gtk::Label::new(Some("Today"));
-        today_label.set_xalign(0.0);
-        today_label.set_margin_bottom(4);
-        today_box.pack_start(&today_label, false, false, 0);
+        // Add each day's timeline
+        for (day_index, events) in day_events.iter().enumerate() {
+            let day_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
 
-        let today_timeline =
-            TimelineView::new(today_events.to_vec(), self.start_hour, self.end_hour, true);
-        today_box.pack_start(&today_timeline.container, true, true, 0);
-        days_box.pack_start(&today_box, true, true, 0);
+            // Create day label
+            let label_text = if day_index == 0 {
+                "Today".to_string()
+            } else if day_index == 1 {
+                "Tomorrow".to_string()
+            } else {
+                let date = Local::now().date_naive() + chrono::Duration::days(day_index as i64);
+                format!("{}", date.format("%A, %B %d"))
+            };
 
-        // Add tomorrow's timeline
-        let tomorrow_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let tomorrow_label = gtk::Label::new(Some("Tomorrow"));
-        tomorrow_label.set_xalign(0.0);
-        tomorrow_label.set_margin_bottom(4);
-        tomorrow_box.pack_start(&tomorrow_label, false, false, 0);
+            let day_label = gtk::Label::new(Some(&label_text));
+            day_label.set_xalign(0.0);
+            day_label.set_margin_bottom(4);
+            day_box.pack_start(&day_label, false, false, 0);
 
-        let tomorrow_timeline = TimelineView::new(
-            tomorrow_events.to_vec(),
-            self.start_hour,
-            self.end_hour,
-            false,
-        );
-        tomorrow_box.pack_start(&tomorrow_timeline.container, true, true, 0);
-        days_box.pack_start(&tomorrow_box, true, true, 0);
+            let timeline = TimelineView::new(
+                events.clone(),
+                self.start_hour,
+                self.end_hour,
+                day_index == 0,
+            );
+            day_box.pack_start(&timeline.container, true, true, 0);
+            days_box.pack_start(&day_box, true, true, 0);
+        }
 
         scrolled_window.add(&days_box);
         main_box.pack_start(&scrolled_window, true, true, 0);
@@ -476,13 +476,10 @@ impl WindowManager {
         self.current_window = Some(window);
     }
 
-    pub fn update_events(&mut self, today_events: Vec<Event>, tomorrow_events: Vec<Event>) {
+    pub fn update_events(&mut self, new_events: Vec<Vec<Event>>) {
         // Update stored events
-        let mut today = self.today_events.lock().unwrap();
-        *today = today_events;
-
-        let mut tomorrow = self.tomorrow_events.lock().unwrap();
-        *tomorrow = tomorrow_events;
+        let mut events = self.day_events.lock().unwrap();
+        *events = new_events;
 
         // Update window if it exists
         if let Some(window) = &self.current_window {
@@ -493,34 +490,46 @@ impl WindowManager {
                     .iter()
                     .for_each(|child| main_box.remove(child));
 
-                // Create horizontal box for today and tomorrow
+                // Create a scrolled window that will contain all days
+                let scrolled_window =
+                    gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+                scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+
+                // Create horizontal box for all days
                 let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
 
-                // Add today's timeline
-                let today_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-                let today_label = gtk::Label::new(Some("Today"));
-                today_label.set_xalign(0.0);
-                today_label.set_margin_bottom(4);
-                today_box.pack_start(&today_label, false, false, 0);
+                // Add each day's timeline
+                for (day_index, day_events) in events.iter().enumerate() {
+                    let day_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
 
-                let today_timeline =
-                    TimelineView::new(today.to_vec(), self.start_hour, self.end_hour, true);
-                today_box.pack_start(&today_timeline.container, true, true, 0);
-                days_box.pack_start(&today_box, true, true, 0);
+                    // Create day label
+                    let label_text = if day_index == 0 {
+                        "Today".to_string()
+                    } else if day_index == 1 {
+                        "Tomorrow".to_string()
+                    } else {
+                        let date =
+                            Local::now().date_naive() + chrono::Duration::days(day_index as i64);
+                        format!("{}", date.format("%A, %B %d"))
+                    };
 
-                // Add tomorrow's timeline
-                let tomorrow_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-                let tomorrow_label = gtk::Label::new(Some("Tomorrow"));
-                tomorrow_label.set_xalign(0.0);
-                tomorrow_label.set_margin_bottom(4);
-                tomorrow_box.pack_start(&tomorrow_label, false, false, 0);
+                    let day_label = gtk::Label::new(Some(&label_text));
+                    day_label.set_xalign(0.0);
+                    day_label.set_margin_bottom(4);
+                    day_box.pack_start(&day_label, false, false, 0);
 
-                let tomorrow_timeline =
-                    TimelineView::new(tomorrow.to_vec(), self.start_hour, self.end_hour, false);
-                tomorrow_box.pack_start(&tomorrow_timeline.container, true, true, 0);
-                days_box.pack_start(&tomorrow_box, true, true, 0);
+                    let timeline = TimelineView::new(
+                        day_events.clone(),
+                        self.start_hour,
+                        self.end_hour,
+                        day_index == 0,
+                    );
+                    day_box.pack_start(&timeline.container, true, true, 0);
+                    days_box.pack_start(&day_box, true, true, 0);
+                }
 
-                main_box.pack_start(&days_box, true, true, 0);
+                scrolled_window.add(&days_box);
+                main_box.pack_start(&scrolled_window, true, true, 0);
                 main_box.show_all();
             }
         }
@@ -529,7 +538,6 @@ impl WindowManager {
 
 pub fn create_indicator_menu(
     today_events: &[Event],
-    tomorrow_events: &[Event],
     indicator: &mut AppIndicator,
     window_manager: Arc<Mutex<WindowManager>>,
 ) {
@@ -665,16 +673,18 @@ fn get_config_directory() -> PathBuf {
 }
 
 pub fn initialize_gui(
-    config_start_hour: i32,
-    config_end_hour: i32,
+    start_hour: i32,
+    end_hour: i32,
+    future_days: i32,
 ) -> (AppIndicator, Arc<Mutex<WindowManager>>) {
     // Initialize GTK
     gtk::init().unwrap();
 
     // Create window manager
     let window_manager = Arc::new(Mutex::new(WindowManager::new(
-        config_start_hour,
-        config_end_hour,
+        start_hour,
+        end_hour,
+        future_days,
     )));
 
     // Set up D-Bus connection
@@ -728,7 +738,7 @@ pub fn initialize_gui(
                     window.hide();
                 }
             }
-            "toggle" => wm.toggle_window(),
+            "toggle" => wm.show_window(),
             _ => (),
         }
         glib::ControlFlow::Continue
@@ -742,7 +752,7 @@ pub fn initialize_gui(
 
     // Create indicator
     let mut indicator = create_indicator();
-    create_indicator_menu(&[], &[], &mut indicator, Arc::clone(&window_manager));
+    create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
 
     (indicator, window_manager)
 }
