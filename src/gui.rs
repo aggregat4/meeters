@@ -204,7 +204,7 @@ impl TimelineView {
             .into_iter()
             .partition(|e| e.start_timestamp.time() == e.end_timestamp.time());
 
-        // Create all-day events section if there are any
+        // Create all-day events section - always show it for consistent spacing
         let all_day_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
         all_day_container.set_margin_bottom(12);
 
@@ -216,6 +216,9 @@ impl TimelineView {
 
         // Create horizontal box for all-day events
         let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+
+        // Set a minimum height for the all-day events box to ensure consistent spacing
+        all_day_events_box.set_size_request(-1, 40);
 
         // Calculate button width based on number of events
         let available_width = 600; // Match the timeline width
