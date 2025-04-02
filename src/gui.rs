@@ -212,6 +212,7 @@ impl TimelineView {
         let all_day_label = gtk::Label::new(Some("All Day"));
         all_day_label.set_xalign(0.0);
         all_day_label.set_margin_bottom(4);
+        all_day_label.set_markup("<b>All Day</b>");
         all_day_container.pack_start(&all_day_label, false, false, 0);
 
         // Create horizontal box for all-day events
@@ -250,6 +251,20 @@ impl TimelineView {
 
         let meeting_area = gtk::Fixed::new();
         meeting_area.set_hexpand(true);
+
+        // Add background with color transitions at working hours
+        let background_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        background_box.set_size_request(600, (end_hour - start_hour) * HOUR_HEIGHT);
+        let style_context = background_box.style_context();
+        let provider = gtk::CssProvider::new();
+        let css = "box { \
+            background-color: rgba(255, 255, 255, 1.0); \
+            margin: 0; \
+            padding: 0; \
+        }";
+        provider.load_from_data(css.as_bytes()).unwrap();
+        style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        meeting_area.put(&background_box, 0, 0);
 
         // Add hour markers and grid lines
         for hour in start_hour..=end_hour {
@@ -449,6 +464,11 @@ impl WindowManager {
             let day_label = gtk::Label::new(Some(&label_text));
             day_label.set_xalign(0.0);
             day_label.set_margin_bottom(4);
+
+            // Make the day label bold
+            let markup = format!("<b>{}</b>", label_text);
+            day_label.set_markup(&markup);
+
             day_box.pack_start(&day_label, false, false, 0);
 
             let timeline = TimelineView::new(
@@ -516,6 +536,11 @@ impl WindowManager {
                     let day_label = gtk::Label::new(Some(&label_text));
                     day_label.set_xalign(0.0);
                     day_label.set_margin_bottom(4);
+
+                    // Make the day label bold
+                    let markup = format!("<b>{}</b>", label_text);
+                    day_label.set_markup(&markup);
+
                     day_box.pack_start(&day_label, false, false, 0);
 
                     let timeline = TimelineView::new(
