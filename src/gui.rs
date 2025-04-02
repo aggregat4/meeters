@@ -676,7 +676,11 @@ pub fn initialize_gui(
     start_hour: i32,
     end_hour: i32,
     future_days: i32,
-) -> (AppIndicator, Arc<Mutex<WindowManager>>) {
+) -> (
+    AppIndicator,
+    Arc<Mutex<WindowManager>>,
+    glib::Receiver<(String, ())>,
+) {
     // Initialize GTK
     gtk::init().unwrap();
 
@@ -707,42 +711,25 @@ pub fn initialize_gui(
         cr.register("net.aggregat4.Meeters", move |b| {
             let show_sender = show_sender.clone();
             b.method("ShowWindow", (), (), move |_, _, ()| {
-                show_sender.send(("show", ())).unwrap();
+                show_sender.send(("show".to_string(), ())).unwrap();
                 Ok(())
             });
 
             let close_sender = close_sender.clone();
             b.method("CloseWindow", (), (), move |_, _, ()| {
-                close_sender.send(("close", ())).unwrap();
+                close_sender.send(("close".to_string(), ())).unwrap();
                 Ok(())
             });
 
             let toggle_sender = toggle_sender.clone();
             b.method("ToggleWindow", (), (), move |_, _, ()| {
-                toggle_sender.send(("toggle", ())).unwrap();
+                toggle_sender.send(("toggle".to_string(), ())).unwrap();
                 Ok(())
             });
         })
     };
 
     cr.insert("/net/aggregat4/Meeters", &[iface_token], ());
-
-    // Handle D-Bus requests in the main GTK thread
-    let window_manager_clone = Arc::clone(&window_manager);
-    dbus_receiver.attach(None, move |(action, _)| {
-        let mut wm = window_manager_clone.lock().unwrap();
-        match action {
-            "show" => wm.show_window(),
-            "close" => {
-                if let Some(window) = &wm.current_window {
-                    window.hide();
-                }
-            }
-            "toggle" => wm.show_window(),
-            _ => (),
-        }
-        glib::ControlFlow::Continue
-    });
 
     // Spawn D-Bus handler thread
     let cr_clone = cr;
@@ -754,7 +741,7 @@ pub fn initialize_gui(
     let mut indicator = create_indicator();
     create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
 
-    (indicator, window_manager)
+    (indicator, window_manager, dbus_receiver)
 }
 
 pub fn run_gui_main_loop() {

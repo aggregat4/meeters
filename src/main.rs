@@ -4,6 +4,7 @@ use std::thread;
 use chrono::prelude::*;
 use chrono_tz::Tz;
 use directories::ProjectDirs;
+use gtk::prelude::*;
 use ureq::Agent;
 
 use crate::domain::Event;
@@ -139,17 +140,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Local Timezone configured as {}", local_tz_iana.clone());
 
     // Initialize GUI components
-    let (mut indicator, window_manager) =
+    let (mut indicator, window_manager, dbus_receiver) =
         gui::initialize_gui(config_start_hour, config_end_hour, config_future_days);
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (events_sender, events_receiver) =
         glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::Priority::DEFAULT);
+    let window_manager_clone = Arc::clone(&window_manager);
     events_receiver.attach(None, move |event_result| {
         match event_result {
             Ok(DayEvents(day_events)) => {
                 // Update window manager with new events
-                let mut wm = window_manager.lock().unwrap();
+                let mut wm = window_manager_clone.lock().unwrap();
                 wm.update_events(day_events.clone());
 
                 // Only show today's events in the indicator menu
@@ -158,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 gui::create_indicator_menu(
                     today_events,
                     &mut indicator,
-                    Arc::clone(&window_manager),
+                    Arc::clone(&window_manager_clone),
                 );
             }
             Ok(EventNotification(event)) => {
@@ -167,6 +169,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(_) => gui::set_error_icon(&mut indicator),
+        }
+        glib::ControlFlow::Continue
+    });
+
+    // Handle D-Bus requests in the main GTK thread
+    let window_manager_clone = Arc::clone(&window_manager);
+    dbus_receiver.attach(None, move |(action, _)| {
+        let mut wm = window_manager_clone.lock().unwrap();
+        match action.as_str() {
+            "show" => wm.show_window(),
+            "close" => {
+                if let Some(window) = &wm.current_window {
+                    window.hide();
+                }
+            }
+            "toggle" => wm.toggle_window(),
+            _ => (),
         }
         glib::ControlFlow::Continue
     });
