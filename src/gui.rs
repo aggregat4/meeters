@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use async_channel::Receiver;
 use chrono::prelude::*;
 use dbus::blocking::Connection;
 use dbus_crossroads::Crossroads;
@@ -704,7 +705,7 @@ pub fn initialize_gui(
 ) -> (
     AppIndicator,
     Arc<Mutex<WindowManager>>,
-    glib::Receiver<(String, ())>,
+    Receiver<(String, ())>,
 ) {
     // Initialize GTK
     gtk::init().unwrap();
@@ -722,8 +723,8 @@ pub fn initialize_gui(
         .request_name("net.aggregat4.Meeters", false, true, false)
         .expect("Failed to request D-Bus name");
 
-    // Create a channel for D-Bus requests
-    let (dbus_sender, dbus_receiver) = glib::MainContext::channel(glib::Priority::DEFAULT);
+    // Create a channel for D-Bus requests using async-channel
+    let (dbus_sender, dbus_receiver) = async_channel::bounded(10);
 
     // Create D-Bus interface
     let mut cr = Crossroads::new();
@@ -736,19 +737,23 @@ pub fn initialize_gui(
         cr.register("net.aggregat4.Meeters", move |b| {
             let show_sender = show_sender.clone();
             b.method("ShowWindow", (), (), move |_, _, ()| {
-                show_sender.send(("show".to_string(), ())).unwrap();
+                show_sender.send_blocking(("show".to_string(), ())).unwrap();
                 Ok(())
             });
 
             let close_sender = close_sender.clone();
             b.method("CloseWindow", (), (), move |_, _, ()| {
-                close_sender.send(("close".to_string(), ())).unwrap();
+                close_sender
+                    .send_blocking(("close".to_string(), ()))
+                    .unwrap();
                 Ok(())
             });
 
             let toggle_sender = toggle_sender.clone();
             b.method("ToggleWindow", (), (), move |_, _, ()| {
-                toggle_sender.send(("toggle".to_string(), ())).unwrap();
+                toggle_sender
+                    .send_blocking(("toggle".to_string(), ()))
+                    .unwrap();
                 Ok(())
             });
         })

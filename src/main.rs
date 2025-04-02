@@ -145,47 +145,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (events_sender, events_receiver) =
-        glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::Priority::DEFAULT);
+        async_channel::bounded::<Result<CalendarMessages, ()>>(10);
     let window_manager_clone = Arc::clone(&window_manager);
-    events_receiver.attach(None, move |event_result| {
-        match event_result {
-            Ok(DayEvents(day_events)) => {
-                // Update window manager with new events
-                let mut wm = window_manager_clone.lock().unwrap();
-                wm.update_events(day_events.clone());
 
-                // Only show today's events in the indicator menu
-                let empty_events = Vec::new();
-                let today_events = day_events.first().unwrap_or(&empty_events);
-                gui::create_indicator_menu(
-                    today_events,
-                    &mut indicator,
-                    Arc::clone(&window_manager_clone),
-                );
-            }
-            Ok(EventNotification(event)) => {
-                if config_show_event_notification {
-                    gui::show_event_notification(event);
+    // Set up a periodic check for event messages
+    let events_receiver_clone = events_receiver.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        while let Ok(event_result) = events_receiver_clone.try_recv() {
+            match event_result {
+                Ok(DayEvents(day_events)) => {
+                    // Update window manager with new events
+                    let mut wm = window_manager_clone.lock().unwrap();
+                    wm.update_events(day_events.clone());
+
+                    // Only show today's events in the indicator menu
+                    let empty_events = Vec::new();
+                    let today_events = day_events.first().unwrap_or(&empty_events);
+                    gui::create_indicator_menu(
+                        today_events,
+                        &mut indicator,
+                        Arc::clone(&window_manager_clone),
+                    );
                 }
+                Ok(EventNotification(event)) => {
+                    if config_show_event_notification {
+                        gui::show_event_notification(event);
+                    }
+                }
+                Err(_) => gui::set_error_icon(&mut indicator),
             }
-            Err(_) => gui::set_error_icon(&mut indicator),
         }
         glib::ControlFlow::Continue
     });
 
     // Handle D-Bus requests in the main GTK thread
     let window_manager_clone = Arc::clone(&window_manager);
-    dbus_receiver.attach(None, move |(action, _)| {
-        let mut wm = window_manager_clone.lock().unwrap();
-        match action.as_str() {
-            "show" => wm.show_window(),
-            "close" => {
-                if let Some(window) = &wm.current_window {
-                    window.hide();
+    let dbus_receiver_clone = dbus_receiver.clone();
+
+    // Set up a periodic check for D-Bus messages
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        while let Ok((action, _)) = dbus_receiver_clone.try_recv() {
+            let mut wm = window_manager_clone.lock().unwrap();
+            match action.as_str() {
+                "show" => wm.show_window(),
+                "close" => {
+                    if let Some(window) = &wm.current_window {
+                        window.hide();
+                    }
                 }
+                "toggle" => wm.toggle_window(),
+                _ => (),
             }
-            "toggle" => wm.toggle_window(),
-            _ => (),
         }
         glib::ControlFlow::Continue
     });
@@ -252,13 +262,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         last_events = day_events[0].clone();
 
                         events_sender
-                            .send(Ok(DayEvents(day_events)))
-                            .expect("Channel should be sendable");
+                            .send_blocking(Ok(DayEvents(day_events)))
+                            .unwrap();
                     }
                     Err(e) => {
-                        events_sender
-                            .send(Err(()))
-                            .expect("Channel should be sendable");
+                        events_sender.send_blocking(Err(())).unwrap();
                         eprintln!("Error getting events: {:?}", e.msg);
                     }
                 }
@@ -277,8 +285,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         != last_notification_start_time.unwrap()
                 {
                     events_sender
-                        .send(Ok(EventNotification(next_immediate_upcoming_event.clone())))
-                        .expect("Channel should be sendable");
+                        .send_blocking(Ok(EventNotification(next_immediate_upcoming_event.clone())))
+                        .unwrap();
                     last_notification_start_time =
                         Some(next_immediate_upcoming_event.start_timestamp);
                 }

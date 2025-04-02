@@ -32,3 +32,4 @@ regex = "1.6"
 roxmltree = "0.20"
 rrule = { git = "https://github.com/aggregat4/rust-rrule", branch = "rrule-0.5" }
 ureq = "3.0"
+async-channel = "2.1"
