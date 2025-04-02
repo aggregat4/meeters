@@ -30,6 +30,9 @@ The following properties are supported:
 | MEETERS_EVENT_NOTIFICATION | no | true | Whether or not an upcoming event should be announced with a sticky notification ("true" or "false") | 
 | MEETERS_POLLING_INTERVAL_MS | no | 120000 | The time in milliseconds between two fetches of the ical calendar. |
 | MEETERS_EVENT_WARNING_TIME_SECONDS | no | 60 | The time in seconds before the next meeting to show the notification. |
+| MEETERS_FUTURE_DAYS | no | 1 | The number of future days to show in the calendar view in addition to today. For example, a value of 1 shows today and tomorrow, 2 shows today plus two more days, etc. |
+| MEETERS_TODAY_START_HOUR | no | 8 | The start hour of the timeline view (0-23). Events before this hour will not be visible in the timeline. |
+| MEETERS_TODAY_END_HOUR | no | 20 | The end hour of the timeline view (0-23). Events after this hour will not be visible in the timeline. |
 
 
 # D-Bus Interface
