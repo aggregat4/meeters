@@ -316,8 +316,8 @@ impl TimeZone for CustomTz {
     }
 
     fn offset_from_local_date(&self, local: &NaiveDate) -> LocalResult<Self::Offset> {
-        let earliest = self.offset_from_local_datetime(&local.and_hms(0, 0, 0));
-        let latest = self.offset_from_local_datetime(&local.and_hms(23, 59, 59));
+        let earliest = self.offset_from_local_datetime(&local.and_hms_opt(0, 0, 0).unwrap());
+        let latest = self.offset_from_local_datetime(&local.and_hms_opt(23, 59, 59).unwrap());
         // From the chrono docs:
         //
         // > This type should be considered ambiguous at best, due to the inherent lack of

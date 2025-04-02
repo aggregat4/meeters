@@ -109,7 +109,9 @@ fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarErr
         // NOTE: we don't convert the datetime to the given timezone since we are talking about a
         // date that represents a particular _day_, not a time. Therefore we need to make sure that
         // we don't accidentally shift it into another day
-        Ok(d) => Ok(tz.ymd(d.year(), d.month(), d.day()).and_hms(0, 0, 0)),
+        Ok(d) => Ok(tz
+            .with_ymd_and_hms(d.year(), d.month(), d.day(), 0, 0, 0)
+            .unwrap()),
         Err(chrono_err) => Err(CalendarError {
             msg: format!(
                 "Can't parse date '{:?}' with cause: {:?}",
@@ -194,8 +196,7 @@ fn parse_event(
         &find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_default(),
     );
     let description = unescape_string(
-        &find_property_value(&ical_event.properties, "DESCRIPTION")
-            .unwrap_or_default(),
+        &find_property_value(&ical_event.properties, "DESCRIPTION").unwrap_or_default(),
     );
     let location = unescape_string(
         &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_default(),
@@ -322,8 +323,8 @@ fn parse_occurrences(
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
                     local_tz
-                        .ymd(dt.year(), dt.month(), dt.day())
-                        .and_hms(0, 0, 0)
+                        .with_ymd_and_hms(dt.year(), dt.month(), dt.day(), 0, 0, 0)
+                        .unwrap()
                 })
                 .collect()),
             Err(e) => Err(CalendarError {
@@ -416,8 +417,8 @@ fn parse_occurrences(
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
                     let original_datetime = &NaiveDateTime::new(
-                        NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()),
-                        NaiveTime::from_hms(dt.hour(), dt.minute(), dt.second()),
+                        NaiveDate::from_ymd_opt(dt.year(), dt.month(), dt.day()).unwrap(),
+                        NaiveTime::from_hms_opt(dt.hour(), dt.minute(), dt.second()).unwrap(),
                     );
                     // println!(
                     //     "converted occurence date from {:?} to {:?}",
