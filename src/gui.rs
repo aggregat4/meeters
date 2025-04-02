@@ -192,7 +192,7 @@ impl TimelineView {
         button
     }
 
-    pub fn new(events: Vec<Event>, start_hour: i32, end_hour: i32) -> Self {
+    pub fn new(events: Vec<Event>, start_hour: i32, end_hour: i32, is_today: bool) -> Self {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         container.set_margin_start(12);
         container.set_margin_end(12);
@@ -205,21 +205,22 @@ impl TimelineView {
             .partition(|e| e.start_timestamp.time() == e.end_timestamp.time());
 
         // Create all-day events section if there are any
+        let all_day_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        all_day_container.set_margin_bottom(12);
+
+        // Add "All Day" label
+        let all_day_label = gtk::Label::new(Some("All Day"));
+        all_day_label.set_xalign(0.0);
+        all_day_label.set_margin_bottom(4);
+        all_day_container.pack_start(&all_day_label, false, false, 0);
+
+        // Create horizontal box for all-day events
+        let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+
+        // Calculate button width based on number of events
+        let available_width = 600; // Match the timeline width
+
         if !all_day_events.is_empty() {
-            let all_day_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
-            all_day_container.set_margin_bottom(12);
-
-            // Add "All Day" label
-            let all_day_label = gtk::Label::new(Some("All Day"));
-            all_day_label.set_xalign(0.0);
-            all_day_label.set_margin_bottom(4);
-            all_day_container.pack_start(&all_day_label, false, false, 0);
-
-            // Create horizontal box for all-day events
-            let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-
-            // Calculate button width based on number of events
-            let available_width = 600; // Match the timeline width
             let button_width = ((available_width - (6 * (all_day_events.len() as i32 + 1)))
                 / all_day_events.len() as i32)
                 .max(150);
@@ -228,10 +229,10 @@ impl TimelineView {
                 let button = Self::create_event_button(&event, button_width, 40, false);
                 all_day_events_box.pack_start(&button, true, true, 0);
             }
-
-            all_day_container.pack_start(&all_day_events_box, false, false, 0);
-            container.pack_start(&all_day_container, false, false, 0);
         }
+
+        all_day_container.pack_start(&all_day_events_box, false, false, 0);
+        container.pack_start(&all_day_container, false, false, 0);
 
         let time_label_width: i32 = 50;
         let spacing: i32 = 10;
@@ -276,24 +277,26 @@ impl TimelineView {
             meeting_area.put(&separator, 0, y_position);
         }
 
-        // Current time indicator
-        let now = Local::now();
-        let current_hour = now.hour() as i32;
-        let current_minute = now.minute() as i32;
-        if current_hour >= start_hour && current_hour <= end_hour {
-            let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
-            let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
+        // Current time indicator (only for today's view)
+        if is_today {
+            let now = Local::now();
+            let current_hour = now.hour() as i32;
+            let current_minute = now.minute() as i32;
+            if current_hour >= start_hour && current_hour <= end_hour {
+                let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
+                let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
 
-            let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            current_time_marker.set_size_request(600, -1); // Match separator width
-            let style_context = current_time_marker.style_context();
-            let provider = gtk::CssProvider::new();
-            provider
-                .load_from_data(b"box { background-color: rgba(255, 0, 0, 0.6); min-height: 2px; margin: 0; padding: 0; }")
-                .unwrap();
-            style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+                let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                current_time_marker.set_size_request(600, -1); // Match separator width
+                let style_context = current_time_marker.style_context();
+                let provider = gtk::CssProvider::new();
+                provider
+                    .load_from_data(b"box { background-color: rgba(255, 0, 0, 0.6); min-height: 2px; margin: 0; padding: 0; }")
+                    .unwrap();
+                style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
-            meeting_area.put(&current_time_marker, 0, y_position);
+                meeting_area.put(&current_time_marker, 0, y_position);
+            }
         }
 
         // Group overlapping events
@@ -352,12 +355,7 @@ impl TimelineView {
         let total_height = (end_hour - start_hour) * HOUR_HEIGHT;
         layout_box.set_size_request(-1, total_height);
 
-        // Add to scrolled window
-        let scrolled_window =
-            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-        scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
-        scrolled_window.add(&layout_box);
-        container.pack_start(&scrolled_window, true, true, 0);
+        container.pack_start(&layout_box, true, true, 0);
 
         Self { container }
     }
@@ -370,7 +368,8 @@ fn calculate_window_height(start_hour: i32, end_hour: i32) -> i32 {
 
 pub struct WindowManager {
     pub current_window: Option<gtk::Window>,
-    events: Arc<Mutex<Vec<Event>>>,
+    today_events: Arc<Mutex<Vec<Event>>>,
+    tomorrow_events: Arc<Mutex<Vec<Event>>>,
     start_hour: i32,
     end_hour: i32,
 }
@@ -379,7 +378,8 @@ impl WindowManager {
     pub fn new(start_hour: i32, end_hour: i32) -> Self {
         WindowManager {
             current_window: None,
-            events: Arc::new(Mutex::new(Vec::new())),
+            today_events: Arc::new(Mutex::new(Vec::new())),
+            tomorrow_events: Arc::new(Mutex::new(Vec::new())),
             start_hour,
             end_hour,
         }
@@ -398,7 +398,8 @@ impl WindowManager {
     }
 
     pub fn show_window(&mut self) {
-        let events = self.events.lock().unwrap();
+        let today_events = self.today_events.lock().unwrap();
+        let tomorrow_events = self.tomorrow_events.lock().unwrap();
 
         if let Some(window) = &self.current_window {
             if window.is_visible() {
@@ -409,8 +410,11 @@ impl WindowManager {
 
         // Create new window
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Today's Meetings");
-        window.set_default_size(700, calculate_window_height(self.start_hour, self.end_hour));
+        window.set_title("Today's and Tomorrow's Meetings");
+        window.set_default_size(
+            1400,
+            calculate_window_height(self.start_hour, self.end_hour),
+        );
 
         let main_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         main_box.set_margin_start(6);
@@ -418,10 +422,44 @@ impl WindowManager {
         main_box.set_margin_top(6);
         main_box.set_margin_bottom(6);
 
-        // Add timeline view
-        let timeline = TimelineView::new(events.to_vec(), self.start_hour, self.end_hour);
-        main_box.pack_start(&timeline.container, true, true, 0);
+        // Create a scrolled window that will contain both days
+        let scrolled_window =
+            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
 
+        // Create horizontal box for today and tomorrow
+        let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+
+        // Add today's timeline
+        let today_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let today_label = gtk::Label::new(Some("Today"));
+        today_label.set_xalign(0.0);
+        today_label.set_margin_bottom(4);
+        today_box.pack_start(&today_label, false, false, 0);
+
+        let today_timeline =
+            TimelineView::new(today_events.to_vec(), self.start_hour, self.end_hour, true);
+        today_box.pack_start(&today_timeline.container, true, true, 0);
+        days_box.pack_start(&today_box, true, true, 0);
+
+        // Add tomorrow's timeline
+        let tomorrow_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let tomorrow_label = gtk::Label::new(Some("Tomorrow"));
+        tomorrow_label.set_xalign(0.0);
+        tomorrow_label.set_margin_bottom(4);
+        tomorrow_box.pack_start(&tomorrow_label, false, false, 0);
+
+        let tomorrow_timeline = TimelineView::new(
+            tomorrow_events.to_vec(),
+            self.start_hour,
+            self.end_hour,
+            false,
+        );
+        tomorrow_box.pack_start(&tomorrow_timeline.container, true, true, 0);
+        days_box.pack_start(&tomorrow_box, true, true, 0);
+
+        scrolled_window.add(&days_box);
+        main_box.pack_start(&scrolled_window, true, true, 0);
         window.add(&main_box);
 
         // Handle window close
@@ -435,10 +473,13 @@ impl WindowManager {
         self.current_window = Some(window);
     }
 
-    pub fn update_events(&mut self, new_events: Vec<Event>) {
+    pub fn update_events(&mut self, today_events: Vec<Event>, tomorrow_events: Vec<Event>) {
         // Update stored events
-        let mut events = self.events.lock().unwrap();
-        *events = new_events;
+        let mut today = self.today_events.lock().unwrap();
+        *today = today_events;
+
+        let mut tomorrow = self.tomorrow_events.lock().unwrap();
+        *tomorrow = tomorrow_events;
 
         // Update window if it exists
         if let Some(window) = &self.current_window {
@@ -449,8 +490,34 @@ impl WindowManager {
                     .iter()
                     .for_each(|child| main_box.remove(child));
 
-                let timeline = TimelineView::new(events.to_vec(), self.start_hour, self.end_hour);
-                main_box.pack_start(&timeline.container, true, true, 0);
+                // Create horizontal box for today and tomorrow
+                let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+
+                // Add today's timeline
+                let today_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+                let today_label = gtk::Label::new(Some("Today"));
+                today_label.set_xalign(0.0);
+                today_label.set_margin_bottom(4);
+                today_box.pack_start(&today_label, false, false, 0);
+
+                let today_timeline =
+                    TimelineView::new(today.to_vec(), self.start_hour, self.end_hour, true);
+                today_box.pack_start(&today_timeline.container, true, true, 0);
+                days_box.pack_start(&today_box, true, true, 0);
+
+                // Add tomorrow's timeline
+                let tomorrow_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+                let tomorrow_label = gtk::Label::new(Some("Tomorrow"));
+                tomorrow_label.set_xalign(0.0);
+                tomorrow_label.set_margin_bottom(4);
+                tomorrow_box.pack_start(&tomorrow_label, false, false, 0);
+
+                let tomorrow_timeline =
+                    TimelineView::new(tomorrow.to_vec(), self.start_hour, self.end_hour, false);
+                tomorrow_box.pack_start(&tomorrow_timeline.container, true, true, 0);
+                days_box.pack_start(&tomorrow_box, true, true, 0);
+
+                main_box.pack_start(&days_box, true, true, 0);
                 main_box.show_all();
             }
         }
@@ -458,61 +525,124 @@ impl WindowManager {
 }
 
 pub fn create_indicator_menu(
-    events: &[Event],
+    today_events: &[Event],
+    tomorrow_events: &[Event],
     indicator: &mut AppIndicator,
     window_manager: Arc<Mutex<WindowManager>>,
 ) {
     let mut m: Menu = gtk::Menu::new();
     let mut nof_upcoming_meetings = 0;
-    if events.is_empty() {
+
+    // Add today's events
+    if today_events.is_empty() && tomorrow_events.is_empty() {
         let item = gtk::MenuItem::with_label("test");
         let label = item.child().unwrap();
         (label.downcast::<gtk::Label>())
             .unwrap()
-            .set_markup("<b>No Events Today</b>");
+            .set_markup("<b>No Events Today or Tomorrow</b>");
         m.append(&item);
     } else {
-        for event in events {
-            let all_day = event.start_timestamp.time() == event.end_timestamp.time();
-            let time_string = if all_day {
-                "All Day".to_owned()
-            } else {
-                format!(
-                    "{} - {}",
-                    &event.start_timestamp.format("%H:%M"),
-                    &event.end_timestamp.format("%H:%M")
-                )
-                .to_owned()
-            };
-            let meeturl_string = match &event.meeturl {
-                Some(_) => " (Zoom)",
-                None => "",
-            };
+        // Add today's events
+        if !today_events.is_empty() {
+            let today_header = gtk::MenuItem::with_label("test");
+            let today_label = today_header.child().unwrap();
+            (today_label.downcast::<gtk::Label>())
+                .unwrap()
+                .set_markup("<b>Today</b>");
+            m.append(&today_header);
 
-            let item = gtk::MenuItem::with_label("Test");
-            let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
-            let now = Local::now();
-            let label_string = if all_day {
-                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
-            } else if now < event.start_timestamp {
-                nof_upcoming_meetings += 1;
-                format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
-            } else if now >= event.start_timestamp && now <= event.end_timestamp {
-                nof_upcoming_meetings += 1;
-                format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
-            } else {
-                format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
-            };
+            for event in today_events {
+                let all_day = event.start_timestamp.time() == event.end_timestamp.time();
+                let time_string = if all_day {
+                    "All Day".to_owned()
+                } else {
+                    format!(
+                        "{} - {}",
+                        &event.start_timestamp.format("%H:%M"),
+                        &event.end_timestamp.format("%H:%M")
+                    )
+                    .to_owned()
+                };
+                let meeturl_string = match &event.meeturl {
+                    Some(_) => " (Zoom)",
+                    None => "",
+                };
 
-            label.set_text(&label_string);
-            let new_event = (*event).clone();
-            if new_event.meeturl.is_some() {
-                item.connect_activate(move |_| {
-                    let meet_url = &new_event.meeturl.as_ref().unwrap();
-                    open_meeting(meet_url);
-                });
+                let item = gtk::MenuItem::with_label("Test");
+                let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
+                let now = Local::now();
+                let label_string = if all_day {
+                    format!("{}: {}{}", time_string, &event.summary, meeturl_string)
+                } else if now < event.start_timestamp {
+                    nof_upcoming_meetings += 1;
+                    format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
+                } else if now >= event.start_timestamp && now <= event.end_timestamp {
+                    nof_upcoming_meetings += 1;
+                    format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
+                } else {
+                    format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
+                };
+
+                label.set_text(&label_string);
+                let new_event = (*event).clone();
+                if new_event.meeturl.is_some() {
+                    item.connect_activate(move |_| {
+                        let meet_url = &new_event.meeturl.as_ref().unwrap();
+                        open_meeting(meet_url);
+                    });
+                }
+                m.append(&item);
             }
-            m.append(&item);
+        }
+
+        // Add tomorrow's events
+        if !tomorrow_events.is_empty() {
+            m.append(&gtk::SeparatorMenuItem::new());
+
+            let tomorrow_header = gtk::MenuItem::with_label("test");
+            let tomorrow_label = tomorrow_header.child().unwrap();
+            (tomorrow_label.downcast::<gtk::Label>())
+                .unwrap()
+                .set_markup("<b>Tomorrow</b>");
+            m.append(&tomorrow_header);
+
+            for event in tomorrow_events {
+                let all_day = event.start_timestamp.time() == event.end_timestamp.time();
+                let time_string = if all_day {
+                    "All Day".to_owned()
+                } else {
+                    format!(
+                        "{} - {}",
+                        &event.start_timestamp.format("%H:%M"),
+                        &event.end_timestamp.format("%H:%M")
+                    )
+                    .to_owned()
+                };
+                let meeturl_string = match &event.meeturl {
+                    Some(_) => " (Zoom)",
+                    None => "",
+                };
+
+                let item = gtk::MenuItem::with_label("Test");
+                let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
+                let now = Local::now();
+                let label_string = if all_day {
+                    format!("{}: {}{}", time_string, &event.summary, meeturl_string)
+                } else {
+                    nof_upcoming_meetings += 1;
+                    format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
+                };
+
+                label.set_text(&label_string);
+                let new_event = (*event).clone();
+                if new_event.meeturl.is_some() {
+                    item.connect_activate(move |_| {
+                        let meet_url = &new_event.meeturl.as_ref().unwrap();
+                        open_meeting(meet_url);
+                    });
+                }
+                m.append(&item);
+            }
         }
     }
 
@@ -670,7 +800,7 @@ pub fn initialize_gui(
 
     // Create indicator
     let mut indicator = create_indicator();
-    create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
+    create_indicator_menu(&[], &[], &mut indicator, Arc::clone(&window_manager));
 
     (indicator, window_manager)
 }

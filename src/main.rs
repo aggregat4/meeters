@@ -88,7 +88,7 @@ const DEFAULT_START_HOUR: i32 = 8;
 const DEFAULT_END_HOUR: i32 = 20;
 
 enum CalendarMessages {
-    TodayEvents(Vec<Event>),
+    TodayEvents(Vec<Event>, Vec<Event>), // (today_events, tomorrow_events)
     EventNotification(Event),
 }
 
@@ -140,16 +140,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         glib::MainContext::channel::<Result<CalendarMessages, ()>>(glib::Priority::DEFAULT);
     events_receiver.attach(None, move |event_result| {
         match event_result {
-            Ok(TodayEvents(events)) => {
+            Ok(TodayEvents(today_events, tomorrow_events)) => {
                 // Update window manager with new events
                 let mut wm = window_manager.lock().unwrap();
-                wm.update_events(events.clone());
+                wm.update_events(today_events.clone(), tomorrow_events.clone());
 
-                if events.is_empty() {
-                    gui::create_indicator_menu(&[], &mut indicator, Arc::clone(&window_manager));
+                if today_events.is_empty() && tomorrow_events.is_empty() {
+                    gui::create_indicator_menu(
+                        &[],
+                        &[],
+                        &mut indicator,
+                        Arc::clone(&window_manager),
+                    );
                 } else {
                     gui::create_indicator_menu(
-                        &events,
+                        &today_events,
+                        &tomorrow_events,
                         &mut indicator,
                         Arc::clone(&window_manager),
                     );
@@ -187,6 +193,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());
                         let local_date = Local::now().date_naive();
+
+                        // Today's events
                         let today_start = local_tz
                             .with_ymd_and_hms(
                                 local_date.year(),
@@ -207,15 +215,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 59,
                             )
                             .unwrap();
-                        let today_events = get_events_for_interval(events, today_start, today_end);
+                        let today_events =
+                            get_events_for_interval(events.clone(), today_start, today_end);
                         println!(
                             "There are {} events for today: {:?}",
                             today_events.len(),
                             today_events
                         );
+
+                        // Tomorrow's events
+                        let tomorrow_date = local_date + chrono::Duration::days(1);
+                        let tomorrow_start = local_tz
+                            .with_ymd_and_hms(
+                                tomorrow_date.year(),
+                                tomorrow_date.month(),
+                                tomorrow_date.day(),
+                                0,
+                                0,
+                                0,
+                            )
+                            .unwrap();
+                        let tomorrow_end = local_tz
+                            .with_ymd_and_hms(
+                                tomorrow_date.year(),
+                                tomorrow_date.month(),
+                                tomorrow_date.day(),
+                                23,
+                                59,
+                                59,
+                            )
+                            .unwrap();
+                        let tomorrow_events =
+                            get_events_for_interval(events, tomorrow_start, tomorrow_end);
+                        println!(
+                            "There are {} events for tomorrow: {:?}",
+                            tomorrow_events.len(),
+                            tomorrow_events
+                        );
+
+                        // Combine today's and tomorrow's events for notifications
                         last_events = today_events.clone();
+                        last_events.extend(tomorrow_events.clone());
+
                         events_sender
-                            .send(Ok(TodayEvents(today_events)))
+                            .send(Ok(TodayEvents(today_events, tomorrow_events)))
                             .expect("Channel should be sendable");
                     }
                     Err(e) => {
