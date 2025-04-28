@@ -28,4 +28,5 @@ pub struct Event {
     pub all_day: bool,
     pub start_timestamp: DateTime<Tz>,
     pub end_timestamp: DateTime<Tz>,
+    pub num_participants: u32,
 }

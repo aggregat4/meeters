@@ -149,26 +149,9 @@ impl TimelineView {
                 event_start.format("%H:%M"),
                 event_end.format("%H:%M")
             );
-            format!(
-                "{}  {}{}",
-                time_str,
-                event.summary,
-                if event.meeturl.is_some() {
-                    " (Zoom)"
-                } else {
-                    ""
-                }
-            )
+            format_meeting_title_with_time(event, &time_str)
         } else {
-            format!(
-                "{}{}",
-                event.summary,
-                if event.meeturl.is_some() {
-                    " (Zoom)"
-                } else {
-                    ""
-                }
-            )
+            format_meeting_title(event, true)
         };
 
         let label = gtk::Label::new(Some(&text));
@@ -590,24 +573,20 @@ pub fn create_indicator_menu(
                 )
                 .to_owned()
             };
-            let meeturl_string = match &event.meeturl {
-                Some(_) => " (Zoom)",
-                None => "",
-            };
 
             let item = gtk::MenuItem::with_label("Test");
             let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
             let now = Local::now();
             let label_string = if all_day {
-                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
+                format_meeting_title_with_time(event, &time_string)
             } else if now < event.start_timestamp {
                 nof_upcoming_meetings += 1;
-                format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
+                format_meeting_title_with_prefix(event, "◦", &time_string)
             } else if now >= event.start_timestamp && now <= event.end_timestamp {
                 nof_upcoming_meetings += 1;
-                format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
+                format_meeting_title_with_prefix(event, "•", &time_string)
             } else {
-                format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
+                format_meeting_title_with_prefix(event, "✓", &time_string)
             };
 
             label.set_text(&label_string);
@@ -650,14 +629,11 @@ pub fn create_indicator_menu(
 }
 
 pub fn show_event_notification(event: Event) {
-    let summary_str = &format!(
-        "{} - {}",
-        event.start_timestamp.format("%H:%M"),
-        event.summary
-    );
+    let time_str = event.start_timestamp.format("%H:%M").to_string();
+    let summary_str = format_meeting_title_with_time(&event, &time_str);
     let mut notification = Notification::new();
     notification
-        .summary(summary_str)
+        .summary(&summary_str)
         .body(
             &event
                 .meeturl
@@ -777,3 +753,37 @@ pub fn initialize_gui(
 pub fn run_gui_main_loop() {
     gtk::main();
 }
+
+/// Returns the appropriate Unicode symbol based on the number of participants
+pub fn get_participant_symbol(num_participants: u32) -> &'static str {
+    match num_participants {
+        1 => "▪",
+        2 => "▪▪",
+        _ => "▪▪▪",
+    }
+}
+
+/// Formats a meeting title with the participant symbol and optional Zoom indicator
+pub fn format_meeting_title(event: &Event, include_zoom_indicator: bool) -> String {
+    let participant_symbol = get_participant_symbol(event.num_participants);
+    let zoom_indicator = if include_zoom_indicator && event.meeturl.is_some() {
+        " (Zoom)"
+    } else {
+        ""
+    };
+    format!(" {} {}{}", participant_symbol, event.summary, zoom_indicator)
+}
+
+/// Formats a meeting title with time and participant symbol
+pub fn format_meeting_title_with_time(event: &Event, time_string: &str) -> String {
+    let participant_symbol = get_participant_symbol(event.num_participants);
+    let zoom_indicator = if event.meeturl.is_some() { " (Zoom)" } else { "" };
+    format!("{}: {} {}{}", time_string, participant_symbol, event.summary, zoom_indicator)
+}
+
+/// Formats a meeting title with a prefix (like bullet points) and time
+pub fn format_meeting_title_with_prefix(event: &Event, prefix: &str, time_string: &str) -> String {
+    let participant_symbol = get_participant_symbol(event.num_participants);
+    let zoom_indicator = if event.meeturl.is_some() { " (Zoom)" } else { "" };
+    format!("{} {}: {} {}{}", prefix, time_string, participant_symbol, event.summary, zoom_indicator)
+} 

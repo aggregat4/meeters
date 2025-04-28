@@ -207,6 +207,16 @@ fn parse_event(
     let meeturl = parse_zoom_url(&location)
         .or_else(|| parse_zoom_url(&summary))
         .or_else(|| parse_zoom_url(&description));
+    
+    // Count the number of participants by looking for email addresses in the description
+    let num_participants = if !description.is_empty() {
+        description.split(|c| c == ',' || c == ';' || c == '\n')
+            .filter(|s| s.contains('@'))
+            .count() as u32
+    } else {
+        1 // Default to 1 if no description
+    };
+
     Ok(Event {
         summary,
         description,
@@ -215,6 +225,7 @@ fn parse_event(
         all_day,
         start_timestamp,
         end_timestamp,
+        num_participants,
     })
 }
 
@@ -585,6 +596,7 @@ fn calculate_occurrences(
                 all_day: parsed_event.all_day,
                 start_timestamp: *datetime,
                 end_timestamp: end_time,
+                num_participants: parsed_event.num_participants,
             }
         })
         .collect()
