@@ -151,7 +151,7 @@ impl TimelineView {
             );
             format_meeting_title_with_time(event, &time_str)
         } else {
-            format_meeting_title(event, true)
+            format_meeting_title(event)
         };
 
         let label = gtk::Label::new(Some(&text));
@@ -757,6 +757,7 @@ pub fn run_gui_main_loop() {
 /// Returns the appropriate Unicode symbol based on the number of participants
 pub fn get_participant_symbol(num_participants: u32) -> &'static str {
     match num_participants {
+        0 => " ",
         1 => "▪",
         2 => "▪▪",
         _ => "▪▪▪",
@@ -764,13 +765,9 @@ pub fn get_participant_symbol(num_participants: u32) -> &'static str {
 }
 
 /// Formats a meeting title with the participant symbol and optional Zoom indicator
-pub fn format_meeting_title(event: &Event, include_zoom_indicator: bool) -> String {
+pub fn format_meeting_title(event: &Event) -> String {
     let participant_symbol = get_participant_symbol(event.num_participants);
-    let zoom_indicator = if include_zoom_indicator && event.meeturl.is_some() {
-        " (Zoom)"
-    } else {
-        ""
-    };
+    let zoom_indicator = if event.meeturl.is_some() { " (Zoom)" } else { "" };
     format!(" {} {}{}", participant_symbol, event.summary, zoom_indicator)
 }
 
@@ -786,4 +783,4 @@ pub fn format_meeting_title_with_prefix(event: &Event, prefix: &str, time_string
     let participant_symbol = get_participant_symbol(event.num_participants);
     let zoom_indicator = if event.meeturl.is_some() { " (Zoom)" } else { "" };
     format!("{} {}: {} {}{}", prefix, time_string, participant_symbol, event.summary, zoom_indicator)
-} 
+}

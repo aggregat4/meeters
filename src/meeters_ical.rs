@@ -208,14 +208,10 @@ fn parse_event(
         .or_else(|| parse_zoom_url(&summary))
         .or_else(|| parse_zoom_url(&description));
     
-    // Count the number of participants by looking for email addresses in the description
-    let num_participants = if !description.is_empty() {
-        description.split(|c| c == ',' || c == ';' || c == '\n')
-            .filter(|s| s.contains('@'))
-            .count() as u32
-    } else {
-        1 // Default to 1 if no description
-    };
+    // Count the number of participants including both attendees and the organizer
+    let num_participants = ical_event.properties.iter()
+        .filter(|p| p.name == "ATTENDEE" || p.name == "ORGANIZER")
+        .count() as u32;
 
     Ok(Event {
         summary,
