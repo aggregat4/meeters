@@ -117,6 +117,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         Err(_) => true,
     };
+    let config_use_zoommtg: bool = match dotenvy::var("MEETERS_USE_ZOOMMTG") {
+        Ok(val) => val.parse::<bool>().expect(
+            "Value for MEETERS_USE_ZOOMMTG configuration parameter must be a boolean",
+        ),
+        Err(_) => false,
+    };
     let config_polling_interval_ms: u128 = match dotenvy::var("MEETERS_POLLING_INTERVAL_MS") {
         Ok(val) => val.parse::<u128>().expect("MEETERS_POLLING_INTERVAL_MS must be a positive integer expressing the polling interval in milliseconds"),
         Err(_) => DEFAULT_POLLING_INTERVAL_MS
@@ -215,7 +221,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 last_download_time = current_time;
                 match get_ical(&config_ical_url)
-                    .and_then(|t| meeters_ical::extract_events(&t, &local_tz))
+                    .and_then(|t| meeters_ical::extract_events(&t, &local_tz, config_use_zoommtg))
                 {
                     Ok(events) => {
                         println!("Successfully got {:?} events", events.len());

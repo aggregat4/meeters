@@ -33,6 +33,7 @@ The following properties are supported:
 | MEETERS_FUTURE_DAYS | no | 1 | The number of future days to show in the calendar view in addition to today. For example, a value of 1 shows today and tomorrow, 2 shows today plus two more days, etc. |
 | MEETERS_TODAY_START_HOUR | no | 8 | The start hour of the timeline view (0-23). Events before this hour will not be visible in the timeline. |
 | MEETERS_TODAY_END_HOUR | no | 20 | The end hour of the timeline view (0-23). Events after this hour will not be visible in the timeline. |
+| MEETERS_USE_ZOOMMTG | no | false | If set to true, Zoom meeting URLs will be opened with `zoommtg://` instead of `https://`. |
 
 
 # D-Bus Interface

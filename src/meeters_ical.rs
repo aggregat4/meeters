@@ -186,11 +186,28 @@ fn parse_zoom_url(text: &str) -> Option<String> {
         .map(|mat| mat.as_str().to_string())
 }
 
+pub fn convert_to_zoommtg(url: &str) -> Option<String> {
+    lazy_static! {
+        static ref ZOOM_URL_CONVERT_REGEX: regex::Regex =
+            Regex::new(r"https?://(?:(?P<company>[^.]+)\.)?zoom\.us/j/(?P<id>\d+)(?:\?pwd=(?P<pwd>[^&]+))?").unwrap();
+    }
+    ZOOM_URL_CONVERT_REGEX.captures(url).map(|caps| {
+        let id = caps.name("id").unwrap().as_str();
+        let pwd = caps.name("pwd").map(|m| m.as_str()).unwrap_or("");
+        if pwd.is_empty() {
+            format!("zoommtg://zoom.us/join?confno={}", id)
+        } else {
+            format!("zoommtg://zoom.us/join?confno={}&pwd={}", id, pwd)
+        }
+    })
+}
+
 // See https://tools.ietf.org/html/rfc5545#section-3.6.1
 fn parse_event(
     ical_event: &IcalEvent,
     calendar_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
+    use_zoommtg: bool,
 ) -> Result<Event, CalendarError> {
     let summary = unescape_string(
         &find_property_value(&ical_event.properties, "SUMMARY").unwrap_or_default(),
@@ -204,9 +221,16 @@ fn parse_event(
     // println!("Parsing event '{}'", summary);
     let (start_timestamp, end_timestamp, all_day) =
         extract_start_end_time(ical_event, calendar_timezones, local_tz)?; // ? short circuits the error
-    let meeturl = parse_zoom_url(&location)
+    let mut meeturl = parse_zoom_url(&location)
         .or_else(|| parse_zoom_url(&summary))
         .or_else(|| parse_zoom_url(&description));
+
+    if use_zoommtg {
+        if let Some(url) = meeturl {
+            meeturl = Some(convert_to_zoommtg(&url).unwrap_or(url));
+        }
+    }
+
     Ok(Event {
         summary,
         description,
@@ -524,12 +548,13 @@ fn parse_events(
     calendar: IcalCalendar,
     calendar_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
+    use_zoommtg: bool,
 ) -> Result<Vec<(IcalEvent, Event)>, CalendarError> {
     calendar
         .events
         .into_iter()
         .map(
-            |event| match parse_event(&event, calendar_timezones, local_tz) {
+            |event| match parse_event(&event, calendar_timezones, local_tz, use_zoommtg) {
                 Ok(parsed_event) => Ok((event, parsed_event)),
                 Err(e) => Err(e),
             },
@@ -590,12 +615,17 @@ fn calculate_occurrences(
         .collect()
 }
 
-pub fn extract_events(text: &str, local_tz: &Tz) -> Result<Vec<Event>, CalendarError> {
+pub fn extract_events(
+    text: &str,
+    local_tz: &Tz,
+    use_zoommtg: bool,
+) -> Result<Vec<Event>, CalendarError> {
     match parse_calendar(text)? {
         Some(calendar) => {
             let calendar_timezones = parse_ical_timezones(&calendar, local_tz)?;
             //println!("Calendar timezones found: {:?}", calendar_timezones);
-            let event_tuples = parse_events(calendar, &calendar_timezones, local_tz)?;
+            let event_tuples =
+                parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
             let (modifying_events, non_modifying_events) =
@@ -670,6 +700,27 @@ mod tests {
     fn rrule_invalid_by_month_value() {
         // This used to fail with "invalid by_month value"
         "DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20221205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12".parse::<RRuleSet>().unwrap();
+    }
+
+    #[test]
+    fn test_zoom_url_conversion() {
+        let url = "https://company.zoom.us/j/123456789?pwd=abcde";
+        let converted = convert_to_zoommtg(url);
+        assert_eq!(
+            converted,
+            Some("zoommtg://zoom.us/join?confno=123456789&pwd=abcde".to_string())
+        );
+
+        let url_no_pwd = "https://zoom.us/j/987654321";
+        let converted_no_pwd = convert_to_zoommtg(url_no_pwd);
+        assert_eq!(
+            converted_no_pwd,
+            Some("zoommtg://zoom.us/join?confno=987654321".to_string())
+        );
+
+        let non_zoom_url = "https://google.com";
+        let converted_none = convert_to_zoommtg(non_zoom_url);
+        assert_eq!(converted_none, None);
     }
 
     // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
