@@ -7,8 +7,8 @@ use directories::ProjectDirs;
 use gtk::prelude::*;
 use ureq::Agent;
 
-use crate::domain::Event;
-use crate::CalendarMessages::{DayEvents, EventNotification};
+use crate::domain::{Event, RefreshState};
+use crate::CalendarMessages::{DayEvents, EventNotification, RefreshStateChanged};
 use domain::CalendarError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -89,10 +89,13 @@ const DEFAULT_START_HOUR: i32 = 8;
 const DEFAULT_END_HOUR: i32 = 20;
 /// Default number of future days to show (1 = today + tomorrow)
 const DEFAULT_FUTURE_DAYS: i32 = 1;
+/// Number of refresh attempts kept in the in-memory tray log
+const REFRESH_LOG_CAPACITY: usize = 100;
 
 enum CalendarMessages {
     DayEvents(Vec<Vec<Event>>), // Vector of events for each day
     EventNotification(Event),
+    RefreshStateChanged,
 }
 
 fn default_tz(_: dotenvy::Error) -> Result<String, dotenvy::Error> {
@@ -145,24 +148,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("Local Timezone configured as {}", local_tz_iana.clone());
 
+    let refresh_state = Arc::new(std::sync::Mutex::new(RefreshState::new(
+        REFRESH_LOG_CAPACITY,
+    )));
+
     // Initialize GUI components
-    let (mut indicator, window_manager, dbus_receiver) =
-        gui::initialize_gui(config_start_hour, config_end_hour, config_future_days);
+    let (mut indicator, window_manager, dbus_receiver) = gui::initialize_gui(
+        config_start_hour,
+        config_end_hour,
+        config_future_days,
+        Arc::clone(&refresh_state),
+    );
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
-    let (events_sender, events_receiver) =
-        async_channel::bounded::<Result<CalendarMessages, ()>>(10);
+    let (events_sender, events_receiver) = async_channel::bounded::<CalendarMessages>(10);
     let window_manager_clone = Arc::clone(&window_manager);
 
     // Set up a periodic check for event messages
     let events_receiver_clone = events_receiver.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        while let Ok(event_result) = events_receiver_clone.try_recv() {
-            match event_result {
-                Ok(DayEvents(day_events)) => {
+        while let Ok(event_message) = events_receiver_clone.try_recv() {
+            match event_message {
+                DayEvents(day_events) => {
                     // Update window manager with new events
-                    let mut wm = window_manager_clone.lock().unwrap();
-                    wm.update_events(day_events.clone());
+                    {
+                        let mut wm = window_manager_clone.lock().unwrap();
+                        wm.update_events(day_events.clone());
+                    }
 
                     // Only show today's events in the indicator menu
                     let empty_events = Vec::new();
@@ -173,12 +185,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Arc::clone(&window_manager_clone),
                     );
                 }
-                Ok(EventNotification(event)) => {
+                EventNotification(event) => {
                     if config_show_event_notification {
                         gui::show_event_notification(event);
                     }
                 }
-                Err(_) => gui::set_error_icon(&mut indicator),
+                RefreshStateChanged => {
+                    let today_events = {
+                        let wm = window_manager_clone.lock().unwrap();
+                        wm.today_events()
+                    };
+                    gui::create_indicator_menu(
+                        &today_events,
+                        &mut indicator,
+                        Arc::clone(&window_manager_clone),
+                    );
+                }
             }
         }
         glib::ControlFlow::Continue
@@ -224,6 +246,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|t| meeters_ical::extract_events(&t, &local_tz, config_use_zoommtg))
                 {
                     Ok(events) => {
+                        {
+                            let mut state = refresh_state.lock().unwrap();
+                            state.record_success(events.len());
+                        }
                         println!("Successfully got {:?} events", events.len());
                         let local_date = Local::now().date_naive();
 
@@ -267,12 +293,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // Store today's events for notifications
                         last_events = day_events[0].clone();
 
-                        events_sender
-                            .send_blocking(Ok(DayEvents(day_events)))
-                            .unwrap();
+                        events_sender.send_blocking(DayEvents(day_events)).unwrap();
                     }
                     Err(e) => {
-                        events_sender.send_blocking(Err(())).unwrap();
+                        {
+                            let mut state = refresh_state.lock().unwrap();
+                            state.record_failure(e.msg.clone());
+                        }
+                        events_sender.send_blocking(RefreshStateChanged).unwrap();
                         eprintln!("Error getting events: {:?}", e.msg);
                     }
                 }
@@ -291,7 +319,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         != last_notification_start_time.unwrap()
                 {
                     events_sender
-                        .send_blocking(Ok(EventNotification(next_immediate_upcoming_event.clone())))
+                        .send_blocking(EventNotification(next_immediate_upcoming_event.clone()))
                         .unwrap();
                     last_notification_start_time =
                         Some(next_immediate_upcoming_event.start_timestamp);
