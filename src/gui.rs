@@ -17,6 +17,32 @@ use crate::domain::{Event, RefreshState};
 
 const HOUR_HEIGHT: i32 = 80; // Height for one hour
 
+const TEXT_PRIMARY: &str = "#242a31";
+const TEXT_MUTED: &str = "#5f6873";
+const TIMELINE_BACKGROUND: &str = "#fbfaf7";
+const TIMELINE_GRID: &str = "rgba(74, 83, 94, 0.14)";
+const TIMELINE_GRID_STRONG: &str = "rgba(74, 83, 94, 0.28)";
+const CURRENT_TIME_MARKER: &str = "rgba(218, 55, 48, 0.72)";
+
+struct EventPalette {
+    background: &'static str,
+    border: &'static str,
+    text: &'static str,
+}
+
+fn load_css(style_context: &gtk::StyleContext, css: &str) {
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(css.as_bytes()).unwrap();
+    style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+fn style_label(label: &gtk::Label, color: &str) {
+    load_css(
+        &label.style_context(),
+        &format!("label {{ color: {}; text-shadow: none; }}", color),
+    );
+}
+
 pub fn has_icons(dir: &Path) -> bool {
     let normal_icon_path = dir.with_file_name("meeters-appindicator.png");
     let error_icon_path = dir.with_file_name("meeters-appindicator-error.png");
@@ -227,19 +253,41 @@ impl TimelineView {
 
         // Style based on event status
         let now = Local::now();
-        let style_context = button.style_context();
-        let color = if now >= event.start_timestamp && now <= event.end_timestamp {
-            "rgba(255, 165, 0, 0.6)" // Current - orange
+        let palette = if now >= event.start_timestamp && now <= event.end_timestamp {
+            EventPalette {
+                background: "rgba(245, 184, 82, 0.92)",
+                border: "#c17a16",
+                text: "#2c2418",
+            }
         } else if now < event.start_timestamp {
-            "rgba(180, 200, 255, 0.8)" // Upcoming - muted blue with higher opacity
+            EventPalette {
+                background: "rgba(204, 217, 246, 0.90)",
+                border: "#7f98c9",
+                text: "#22304d",
+            }
         } else {
-            "rgba(220, 220, 220, 0.6)" // Past - lighter gray
+            EventPalette {
+                background: "rgba(226, 229, 232, 0.78)",
+                border: "#c1c8cf",
+                text: "#59636f",
+            }
         };
 
-        let css = format!("button {{ background: {}; border-radius: 4px; }}", color);
-        let provider = gtk::CssProvider::new();
-        provider.load_from_data(css.as_bytes()).unwrap();
-        style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        load_css(
+            &button.style_context(),
+            &format!(
+                "button {{ \
+                    background: {}; \
+                    border: 1px solid {}; \
+                    border-radius: 5px; \
+                    box-shadow: inset 0 1px rgba(255, 255, 255, 0.34); \
+                    color: {}; \
+                    text-shadow: none; \
+                }} \
+                button:hover {{ border-color: {}; }}",
+                palette.background, palette.border, palette.text, palette.text
+            ),
+        );
 
         // Add event text
         let text = if show_time {
@@ -281,6 +329,7 @@ impl TimelineView {
         label.set_margin_end(8);
         label.set_margin_top(4);
         label.set_margin_bottom(4);
+        style_label(&label, palette.text);
         button.add(&label);
 
         // Add click handler for meeting URL if available
@@ -315,6 +364,7 @@ impl TimelineView {
         all_day_label.set_xalign(0.0);
         all_day_label.set_margin_bottom(4);
         all_day_label.set_markup("All Day");
+        style_label(&all_day_label, TEXT_PRIMARY);
         all_day_container.pack_start(&all_day_label, false, false, 0);
 
         // Create horizontal box for all-day events
@@ -357,15 +407,15 @@ impl TimelineView {
         // Add background with color transitions at working hours
         let background_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         background_box.set_size_request(600, (end_hour - start_hour) * HOUR_HEIGHT);
-        let style_context = background_box.style_context();
-        let provider = gtk::CssProvider::new();
-        let css = "box { \
-            background-color: rgba(255, 255, 255, 1.0); \
-            margin: 0; \
-            padding: 0; \
-        }";
-        provider.load_from_data(css.as_bytes()).unwrap();
-        style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        let css = format!(
+            "box {{ \
+                background-color: {}; \
+                margin: 0; \
+                padding: 0; \
+            }}",
+            TIMELINE_BACKGROUND
+        );
+        load_css(&background_box.style_context(), &css);
         meeting_area.put(&background_box, 0, 0);
 
         // Add hour markers and grid lines
@@ -376,47 +426,29 @@ impl TimelineView {
             let label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
             label.set_xalign(1.0);
             label.set_margin_end(5);
+            style_label(&label, TEXT_MUTED);
             time_column.put(&label, 0, y_position);
 
             // Hour separator with styling
             let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             separator.set_size_request(600, -1); // Explicit width, slightly less than window width
-            let style_context = separator.style_context();
 
             // Different styles for start/end of day vs regular hours
             let css = if hour == start_hour || hour == end_hour {
-                "box { background-color: rgba(100, 100, 100, 0.3); min-height: 2px; margin: 0; padding: 0; }"
+                format!(
+                    "box {{ background-color: {}; min-height: 2px; margin: 0; padding: 0; }}",
+                    TIMELINE_GRID_STRONG
+                )
             } else {
-                "box { background-color: rgba(200, 200, 200, 0.3); min-height: 1px; margin: 0; padding: 0; }"
+                format!(
+                    "box {{ background-color: {}; min-height: 1px; margin: 0; padding: 0; }}",
+                    TIMELINE_GRID
+                )
             };
 
-            let provider = gtk::CssProvider::new();
-            provider.load_from_data(css.as_bytes()).unwrap();
-            style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            load_css(&separator.style_context(), &css);
 
             meeting_area.put(&separator, 0, y_position);
-        }
-
-        // Current time indicator (only for today's view)
-        if is_today {
-            let now = Local::now();
-            let current_hour = now.hour() as i32;
-            let current_minute = now.minute() as i32;
-            if current_hour >= start_hour && current_hour <= end_hour {
-                let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
-                let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
-
-                let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                current_time_marker.set_size_request(600, -1); // Match separator width
-                let style_context = current_time_marker.style_context();
-                let provider = gtk::CssProvider::new();
-                provider
-                    .load_from_data(b"box { background-color: rgba(255, 0, 0, 0.6); min-height: 2px; margin: 0; padding: 0; }")
-                    .unwrap();
-                style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-
-                meeting_area.put(&current_time_marker, 0, y_position);
-            }
         }
 
         // Group overlapping events
@@ -464,6 +496,29 @@ impl TimelineView {
 
                 let button = Self::create_event_button(event, button_width, height, true);
                 meeting_area.put(&button, x_position, y_position);
+            }
+        }
+
+        // Current time indicator is added last so it stays visible over event buttons.
+        if is_today {
+            let now = Local::now();
+            let current_hour = now.hour() as i32;
+            let current_minute = now.minute() as i32;
+            if current_hour >= start_hour && current_hour <= end_hour {
+                let minutes_from_start = (current_hour - start_hour) * 60 + current_minute;
+                let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
+
+                let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                current_time_marker.set_size_request(600, -1); // Match separator width
+                load_css(
+                    &current_time_marker.style_context(),
+                    &format!(
+                        "box {{ background-color: {}; min-height: 2px; margin: 0; padding: 0; }}",
+                        CURRENT_TIME_MARKER
+                    ),
+                );
+
+                meeting_area.put(&current_time_marker, 0, y_position);
             }
         }
 
@@ -577,6 +632,7 @@ impl WindowManager {
             // Make the day label bold
             let markup = format!("<b>{}</b>", label_text);
             day_label.set_markup(&markup);
+            style_label(&day_label, TEXT_PRIMARY);
 
             day_box.pack_start(&day_label, false, false, 0);
 
@@ -649,6 +705,7 @@ impl WindowManager {
                     // Make the day label bold
                     let markup = format!("<b>{}</b>", label_text);
                     day_label.set_markup(&markup);
+                    style_label(&day_label, TEXT_PRIMARY);
 
                     day_box.pack_start(&day_label, false, false, 0);
 

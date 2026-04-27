@@ -188,8 +188,10 @@ fn parse_zoom_url(text: &str) -> Option<String> {
 
 pub fn convert_to_zoommtg(url: &str) -> Option<String> {
     lazy_static! {
-        static ref ZOOM_URL_CONVERT_REGEX: regex::Regex =
-            Regex::new(r"https?://(?:(?P<company>[^.]+)\.)?zoom\.us/j/(?P<id>\d+)(?:\?pwd=(?P<pwd>[^&]+))?").unwrap();
+        static ref ZOOM_URL_CONVERT_REGEX: regex::Regex = Regex::new(
+            r"https?://(?:(?P<company>[^.]+)\.)?zoom\.us/j/(?P<id>\d+)(?:\?pwd=(?P<pwd>[^&]+))?"
+        )
+        .unwrap();
     }
     ZOOM_URL_CONVERT_REGEX.captures(url).map(|caps| {
         let id = caps.name("id").unwrap().as_str();
@@ -624,8 +626,7 @@ pub fn extract_events(
         Some(calendar) => {
             let calendar_timezones = parse_ical_timezones(&calendar, local_tz)?;
             //println!("Calendar timezones found: {:?}", calendar_timezones);
-            let event_tuples =
-                parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
+            let event_tuples = parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
             let (modifying_events, non_modifying_events) =

@@ -121,9 +121,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => true,
     };
     let config_use_zoommtg: bool = match dotenvy::var("MEETERS_USE_ZOOMMTG") {
-        Ok(val) => val.parse::<bool>().expect(
-            "Value for MEETERS_USE_ZOOMMTG configuration parameter must be a boolean",
-        ),
+        Ok(val) => val
+            .parse::<bool>()
+            .expect("Value for MEETERS_USE_ZOOMMTG configuration parameter must be a boolean"),
         Err(_) => false,
     };
     let config_polling_interval_ms: u128 = match dotenvy::var("MEETERS_POLLING_INTERVAL_MS") {
