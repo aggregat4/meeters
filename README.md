@@ -34,6 +34,7 @@ The following properties are supported:
 | MEETERS_TODAY_START_HOUR | no | 8 | The start hour of the timeline view (0-23). Events before this hour will not be visible in the timeline. |
 | MEETERS_TODAY_END_HOUR | no | 20 | The end hour of the timeline view (0-23). Events after this hour will not be visible in the timeline. |
 | MEETERS_USE_ZOOMMTG | no | false | If set to true, Zoom meeting URLs will be opened with `zoommtg://` instead of `https://`. |
+| MEETERS_LOG | no | warn | Controls stderr log verbosity. Supported values: `off`, `error`, `warn`, `info`, `debug`/`verbose`, and `trace`. |
 
 
 # D-Bus Interface
