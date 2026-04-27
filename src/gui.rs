@@ -16,6 +16,8 @@ use notify_rust::Notification;
 use crate::domain::{Event, RefreshState};
 
 const HOUR_HEIGHT: i32 = 80; // Height for one hour
+const TIMELINE_MIN_WIDTH: i32 = 600;
+const DAY_MIN_WIDTH: i32 = 700;
 
 const TEXT_PRIMARY: &str = "#242a31";
 const TEXT_SUBTLE: &str = "#75808c";
@@ -381,11 +383,8 @@ impl TimelineView {
         // Set a minimum height for the all-day events box to ensure consistent spacing
         all_day_events_box.set_size_request(-1, if all_day_events.is_empty() { 12 } else { 40 });
 
-        // Calculate button width based on number of events
-        let available_width = 600; // Match the timeline width
-
         if !all_day_events.is_empty() {
-            let button_width = ((available_width - (6 * (all_day_events.len() as i32 + 1)))
+            let button_width = ((TIMELINE_MIN_WIDTH - (6 * (all_day_events.len() as i32 + 1)))
                 / all_day_events.len() as i32)
                 .max(150);
 
@@ -411,10 +410,11 @@ impl TimelineView {
 
         let meeting_area = gtk::Fixed::new();
         meeting_area.set_hexpand(true);
+        meeting_area.set_size_request(TIMELINE_MIN_WIDTH, (end_hour - start_hour) * HOUR_HEIGHT);
 
         // Add background with color transitions at working hours
         let background_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        background_box.set_size_request(600, (end_hour - start_hour) * HOUR_HEIGHT);
+        background_box.set_size_request(TIMELINE_MIN_WIDTH, (end_hour - start_hour) * HOUR_HEIGHT);
         let css = format!(
             "box {{ \
                 background-color: {}; \
@@ -425,7 +425,6 @@ impl TimelineView {
         );
         load_css(&background_box.style_context(), &css);
         meeting_area.put(&background_box, 0, 0);
-
         let timeline_rail = gtk::Box::new(gtk::Orientation::Vertical, 0);
         timeline_rail.set_size_request(2, (end_hour - start_hour) * HOUR_HEIGHT);
         load_css(
@@ -450,7 +449,7 @@ impl TimelineView {
 
             // Hour separator with styling
             let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            separator.set_size_request(600, -1); // Explicit width, slightly less than window width
+            separator.set_size_request(TIMELINE_MIN_WIDTH, -1);
 
             // Different styles for start/end of day vs regular hours
             let css = if hour == start_hour || hour == end_hour {
@@ -495,9 +494,8 @@ impl TimelineView {
         // Render event groups
         for group in event_groups {
             let group_size = group.len() as i32;
-            let available_width = 600; // Will be adjusted based on actual width
             let button_width =
-                ((available_width - (spacing * (group_size + 1))) / group_size).max(200);
+                ((TIMELINE_MIN_WIDTH - (spacing * (group_size + 1))) / group_size).max(200);
 
             for (index, event) in group.iter().enumerate() {
                 let event_start = event.start_timestamp.with_timezone(&Local);
@@ -534,7 +532,7 @@ impl TimelineView {
                 let y_position = (minutes_from_start * HOUR_HEIGHT) / 60;
 
                 let current_time_marker = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                current_time_marker.set_size_request(600, -1); // Match separator width
+                current_time_marker.set_size_request(TIMELINE_MIN_WIDTH, -1);
                 load_css(
                     &current_time_marker.style_context(),
                     &format!(
@@ -558,12 +556,13 @@ impl TimelineView {
             }
         }
 
+        let total_height = (end_hour - start_hour) * HOUR_HEIGHT;
+
         // Assemble the layout
         layout_box.pack_start(&time_column, false, false, 0);
         layout_box.pack_start(&meeting_area, true, true, 0);
 
         // Set a minimum height for the layout - no need for +1 as we want to end exactly at end_hour
-        let total_height = (end_hour - start_hour) * HOUR_HEIGHT;
         layout_box.set_size_request(-1, total_height);
 
         container.pack_start(&layout_box, true, true, 0);
@@ -678,7 +677,7 @@ impl WindowManager {
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         window.set_title("Calendar View");
         window.set_default_size(
-            (700 * (self.future_days + 1)) as i32,
+            DAY_MIN_WIDTH * (self.future_days + 1),
             calculate_window_height(self.start_hour, self.end_hour),
         );
 

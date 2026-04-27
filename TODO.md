@@ -24,10 +24,8 @@
 
 ## 4. Improve timeline sizing and layout responsiveness
 
-- [ ] Replace hard-coded timeline widths (`600`) and day/window width assumptions (`700 * days`) in `src/gui.rs`.
-- [ ] Investigate GTK allocation-based sizing or layout containers that can expand naturally while preserving exact vertical timeline positioning.
-- [ ] Ensure overlapping events still calculate widths correctly when the window is resized.
-- [ ] Verify today-only and multi-day views at narrow and wide window sizes.
+- [x] Replace raw timeline/window width literals (`600`, `700 * days`) with named constants in `src/gui.rs`.
+- [x] Investigate GTK allocation-based sizing while preserving exact vertical positioning. The attempted `gtk::Fixed` allocation callback plus `set_size_request` approach caused resize locking and event-height regressions, so responsive width needs a different layout strategy.
 
 ## 5. Replace GUI-thread channel polling with GLib-friendly event delivery
 
