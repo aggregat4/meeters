@@ -43,9 +43,9 @@
 
 ## 7. Split `src/gui.rs` into focused modules
 
-- [ ] Split tray/appindicator code, timeline rendering, window management, refresh log dialog, D-Bus setup, and notifications into separate modules.
-- [ ] Keep public APIs small: `initialize_gui`, `run_gui_main_loop`, and a small window/tray coordination surface.
-- [ ] Do this after extracting duplicated day view code, so the split is mostly moving already-clean functions.
+- [x] Split tray/appindicator code, timeline rendering, window management, refresh log dialog, D-Bus setup, and notifications into separate modules.
+- [x] Keep public APIs small: `initialize_gui`, `run_gui_main_loop`, and a small window/tray coordination surface.
+- [x] Do this after extracting duplicated day view code, so the split is mostly moving already-clean functions.
 
 ## 8. Introduce a richer error type
 
