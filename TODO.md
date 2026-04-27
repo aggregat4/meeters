@@ -17,10 +17,10 @@
 
 ## 3. Extract duplicated day view construction
 
-- [ ] Remove duplicated UI construction between `WindowManager::show_window` and `WindowManager::update_events` in `src/gui.rs`.
-- [ ] Extract helpers such as `build_days_view(...)`, `day_label_text(...)`, and possibly `build_day_box(...)`.
-- [ ] Keep behavior unchanged: same day labels, same timeline creation, same scrolled window policy.
-- [ ] After extraction, future styling and layout changes should happen in one place only.
+- [x] Remove duplicated UI construction between `WindowManager::show_window` and `WindowManager::update_events` in `src/gui.rs`.
+- [x] Extract helpers such as `build_days_view(...)`, `day_label_text(...)`, and possibly `build_day_box(...)`.
+- [x] Keep behavior unchanged: same day labels, same timeline creation, same scrolled window policy.
+- [x] After extraction, future styling and layout changes should happen in one place only.
 
 ## 4. Improve timeline sizing and layout responsiveness
 

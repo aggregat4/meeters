@@ -615,6 +615,55 @@ impl WindowManager {
         }
     }
 
+    fn day_label_text(day_index: usize) -> String {
+        if day_index == 0 {
+            "Today".to_string()
+        } else if day_index == 1 {
+            "Tomorrow".to_string()
+        } else {
+            let date = Local::now().date_naive() + chrono::Duration::days(day_index as i64);
+            format!("{}", date.format("%A, %B %d"))
+        }
+    }
+
+    fn build_day_box(&self, day_index: usize, events: &[Event]) -> gtk::Box {
+        let day_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let label_text = Self::day_label_text(day_index);
+
+        let day_label = gtk::Label::new(Some(&label_text));
+        day_label.set_xalign(0.0);
+        day_label.set_margin_bottom(4);
+        day_label.set_markup(&format!("<b>{}</b>", label_text));
+        style_label_with_css(&day_label, TEXT_PRIMARY, "font-size: 15px;");
+
+        day_box.pack_start(&day_label, false, false, 0);
+
+        let timeline = TimelineView::new(
+            events.to_vec(),
+            self.start_hour,
+            self.end_hour,
+            day_index == 0,
+        );
+        day_box.pack_start(&timeline.container, true, true, 0);
+
+        day_box
+    }
+
+    fn build_days_view(&self, day_events: &[Vec<Event>]) -> gtk::ScrolledWindow {
+        let scrolled_window =
+            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+
+        let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        for (day_index, events) in day_events.iter().enumerate() {
+            let day_box = self.build_day_box(day_index, events);
+            days_box.pack_start(&day_box, true, true, 0);
+        }
+
+        scrolled_window.add(&days_box);
+        scrolled_window
+    }
+
     pub fn show_window(&mut self) {
         let day_events = self.day_events.lock().unwrap();
 
@@ -639,50 +688,7 @@ impl WindowManager {
         main_box.set_margin_top(6);
         main_box.set_margin_bottom(6);
 
-        // Create a scrolled window that will contain all days
-        let scrolled_window =
-            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-        scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
-
-        // Create horizontal box for all days
-        let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-
-        // Add each day's timeline
-        for (day_index, events) in day_events.iter().enumerate() {
-            let day_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-
-            // Create day label
-            let label_text = if day_index == 0 {
-                "Today".to_string()
-            } else if day_index == 1 {
-                "Tomorrow".to_string()
-            } else {
-                let date = Local::now().date_naive() + chrono::Duration::days(day_index as i64);
-                format!("{}", date.format("%A, %B %d"))
-            };
-
-            let day_label = gtk::Label::new(Some(&label_text));
-            day_label.set_xalign(0.0);
-            day_label.set_margin_bottom(4);
-
-            // Make the day label bold
-            let markup = format!("<b>{}</b>", label_text);
-            day_label.set_markup(&markup);
-            style_label_with_css(&day_label, TEXT_PRIMARY, "font-size: 15px;");
-
-            day_box.pack_start(&day_label, false, false, 0);
-
-            let timeline = TimelineView::new(
-                events.clone(),
-                self.start_hour,
-                self.end_hour,
-                day_index == 0,
-            );
-            day_box.pack_start(&timeline.container, true, true, 0);
-            days_box.pack_start(&day_box, true, true, 0);
-        }
-
-        scrolled_window.add(&days_box);
+        let scrolled_window = self.build_days_view(&day_events);
         main_box.pack_start(&scrolled_window, true, true, 0);
         window.add(&main_box);
 
@@ -711,51 +717,7 @@ impl WindowManager {
                     .iter()
                     .for_each(|child| main_box.remove(child));
 
-                // Create a scrolled window that will contain all days
-                let scrolled_window =
-                    gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-                scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
-
-                // Create horizontal box for all days
-                let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-
-                // Add each day's timeline
-                for (day_index, day_events) in events.iter().enumerate() {
-                    let day_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-
-                    // Create day label
-                    let label_text = if day_index == 0 {
-                        "Today".to_string()
-                    } else if day_index == 1 {
-                        "Tomorrow".to_string()
-                    } else {
-                        let date =
-                            Local::now().date_naive() + chrono::Duration::days(day_index as i64);
-                        format!("{}", date.format("%A, %B %d"))
-                    };
-
-                    let day_label = gtk::Label::new(Some(&label_text));
-                    day_label.set_xalign(0.0);
-                    day_label.set_margin_bottom(4);
-
-                    // Make the day label bold
-                    let markup = format!("<b>{}</b>", label_text);
-                    day_label.set_markup(&markup);
-                    style_label_with_css(&day_label, TEXT_PRIMARY, "font-size: 15px;");
-
-                    day_box.pack_start(&day_label, false, false, 0);
-
-                    let timeline = TimelineView::new(
-                        day_events.clone(),
-                        self.start_hour,
-                        self.end_hour,
-                        day_index == 0,
-                    );
-                    day_box.pack_start(&timeline.container, true, true, 0);
-                    days_box.pack_start(&day_box, true, true, 0);
-                }
-
-                scrolled_window.add(&days_box);
+                let scrolled_window = self.build_days_view(&events);
                 main_box.pack_start(&scrolled_window, true, true, 0);
                 main_box.show_all();
             }
