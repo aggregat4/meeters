@@ -490,8 +490,14 @@ impl TimelineView {
                 let duration_minutes =
                     event_end.signed_duration_since(event_start).num_minutes() as i32;
 
-                let y_position = (start_minutes * HOUR_HEIGHT) / 60;
-                let height = (duration_minutes * HOUR_HEIGHT) / 60;
+                let touches_previous_event = regular_events
+                    .iter()
+                    .any(|other| other.end_timestamp == event.start_timestamp);
+                let y_position =
+                    (start_minutes * HOUR_HEIGHT) / 60 - if touches_previous_event { 1 } else { 0 };
+                let height = ((duration_minutes * HOUR_HEIGHT) / 60
+                    + if touches_previous_event { 1 } else { 0 })
+                .max(30);
                 let x_position = spacing + (button_width + spacing) * index as i32;
 
                 let button = Self::create_event_button(event, button_width, height, true);
