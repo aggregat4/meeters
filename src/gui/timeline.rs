@@ -11,6 +11,24 @@ pub const HOUR_HEIGHT: i32 = 80;
 pub const TIMELINE_MIN_WIDTH: i32 = 600;
 pub const DAY_MIN_WIDTH: i32 = 700;
 
+fn event_button_width(group_size: i32, spacing: i32) -> i32 {
+    ((TIMELINE_MIN_WIDTH - (spacing * (group_size + 1))) / group_size).max(200)
+}
+
+fn event_vertical_geometry(
+    start_minutes: i32,
+    duration_minutes: i32,
+    touches_previous_event: bool,
+) -> (i32, i32) {
+    let y_position =
+        (start_minutes * HOUR_HEIGHT) / 60 - if touches_previous_event { 1 } else { 0 };
+    let height = ((duration_minutes * HOUR_HEIGHT) / 60
+        + if touches_previous_event { 1 } else { 0 })
+    .max(30);
+
+    (y_position, height)
+}
+
 pub struct TimelineView {
     pub container: gtk::Box,
 }
@@ -221,8 +239,7 @@ impl TimelineView {
 
         for group in event_groups {
             let group_size = group.len() as i32;
-            let button_width =
-                ((TIMELINE_MIN_WIDTH - (spacing * (group_size + 1))) / group_size).max(200);
+            let button_width = event_button_width(group_size, spacing);
 
             for (index, event) in group.iter().enumerate() {
                 let event_start = event.start_timestamp.with_timezone(&Local);
@@ -236,11 +253,11 @@ impl TimelineView {
                 let touches_previous_event = regular_events
                     .iter()
                     .any(|other| other.end_timestamp == event.start_timestamp);
-                let y_position =
-                    (start_minutes * HOUR_HEIGHT) / 60 - if touches_previous_event { 1 } else { 0 };
-                let height = ((duration_minutes * HOUR_HEIGHT) / 60
-                    + if touches_previous_event { 1 } else { 0 })
-                .max(30);
+                let (y_position, height) = event_vertical_geometry(
+                    start_minutes,
+                    duration_minutes,
+                    touches_previous_event,
+                );
                 let x_position = spacing + (button_width + spacing) * index as i32;
 
                 let button = Self::create_event_button(event, button_width, height, true);
@@ -290,5 +307,43 @@ impl TimelineView {
         container.pack_start(&layout_box, true, true, 0);
 
         Self { container }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adjacent_event_geometry_expands_into_shared_boundary() {
+        let (y_position, height) = event_vertical_geometry(150, 30, true);
+
+        assert_eq!(y_position, 199);
+        assert_eq!(height, 41);
+    }
+
+    #[test]
+    fn non_adjacent_event_geometry_uses_exact_timeline_position() {
+        let (y_position, height) = event_vertical_geometry(150, 30, false);
+
+        assert_eq!(y_position, 200);
+        assert_eq!(height, 40);
+    }
+
+    #[test]
+    fn short_event_geometry_keeps_minimum_height() {
+        let (_y_position, height) = event_vertical_geometry(150, 10, false);
+
+        assert_eq!(height, 30);
+    }
+
+    #[test]
+    fn overlapping_event_width_splits_available_timeline_space() {
+        assert_eq!(event_button_width(2, 10), 285);
+    }
+
+    #[test]
+    fn overlapping_event_width_keeps_minimum_readable_width() {
+        assert_eq!(event_button_width(4, 10), 200);
     }
 }

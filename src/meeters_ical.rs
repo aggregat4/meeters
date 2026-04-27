@@ -79,23 +79,25 @@ fn parse_ical_datetime<T: TimeZone>(
     datetime: &str,
     tz: &Either<Tz, &CustomTz>,
     target_tz: &T,
+    context: &str,
 ) -> Result<DateTime<T>, CalendarError> {
     match NaiveDateTime::parse_from_str(datetime, "%Y%m%dT%H%M%S") {
         Ok(d) => match tz {
             Either::Left(source_tz) => single_local_datetime(
                 source_tz.from_local_datetime(&d),
-                &format!("datetime {}", datetime),
+                &format!("{} datetime {}", context, datetime),
             )
             .map(|datetime| datetime.with_timezone(target_tz)),
             Either::Right(source_tz) => single_local_datetime(
                 source_tz.from_local_datetime(&d),
-                &format!("datetime {}", datetime),
+                &format!("{} datetime {}", context, datetime),
             )
             .map(|datetime| datetime.with_timezone(target_tz)),
         },
-        Err(_) => Err(CalendarError {
-            msg: "Can't parse datetime string with tzid".to_string(),
-        }),
+        Err(_) => Err(calendar_error(format!(
+            "Can't parse datetime string for {}: {}",
+            context, datetime
+        ))),
     }
 }
 
@@ -116,7 +118,7 @@ fn extract_ical_datetime(
         // We are assuming there is only one value in the TZID param
         let tzid = unescape_string(tzid_value);
         match parse_tzid(&tzid, calendar_timezones) {
-            Ok(timezone) => parse_ical_datetime(date_time_str, &timezone, local_tz),
+            Ok(timezone) => parse_ical_datetime(date_time_str, &timezone, local_tz, &prop.name),
             Err(e) => Err(calendar_error(format!(
                 "error parsing TZID '{}' on {} property: {}",
                 tzid, prop.name, e
@@ -130,9 +132,9 @@ fn extract_ical_datetime(
             let utc_datetime = date_time_str
                 .strip_suffix('Z')
                 .ok_or_else(|| calendar_error("UTC datetime marker could not be stripped"))?;
-            parse_ical_datetime(utc_datetime, &Left(UTC), local_tz)
+            parse_ical_datetime(utc_datetime, &Left(UTC), local_tz, &prop.name)
         } else {
-            parse_ical_datetime(date_time_str, &Left(*local_tz), local_tz)
+            parse_ical_datetime(date_time_str, &Left(*local_tz), local_tz, &prop.name)
         }
     }
 }
@@ -461,16 +463,22 @@ fn parse_occurrences(
                         calendar_error("RRULE UNTIL value ended with Z but could not be stripped")
                     })?;
                     let until_originaltz_str = match &original_tz {
-                        Either::Left(original_tz) => {
-                            parse_ical_datetime(until_value, &Left(UTC), original_tz)?
-                                .format("%Y%m%dT%H%M%S")
-                                .to_string()
-                        }
-                        Either::Right(original_tz) => {
-                            parse_ical_datetime(until_value, &Left(UTC), *original_tz)?
-                                .format("%Y%m%dT%H%M%S")
-                                .to_string()
-                        }
+                        Either::Left(original_tz) => parse_ical_datetime(
+                            until_value,
+                            &Left(UTC),
+                            original_tz,
+                            "RRULE UNTIL",
+                        )?
+                        .format("%Y%m%dT%H%M%S")
+                        .to_string(),
+                        Either::Right(original_tz) => parse_ical_datetime(
+                            until_value,
+                            &Left(UTC),
+                            *original_tz,
+                            "RRULE UNTIL",
+                        )?
+                        .format("%Y%m%dT%H%M%S")
+                        .to_string(),
                     };
                     format!("UNTIL={}", until_originaltz_str)
                 } else {
@@ -831,6 +839,74 @@ END:VCALENDAR";
         let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
         assert!(error.msg.contains("error parsing TZID"));
         assert!(error.msg.contains("Unknown/Timezone"));
+    }
+
+    #[test]
+    fn malformed_event_with_invalid_dtstart_value_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:invalid-dtstart\n\
+SUMMARY:Invalid DTSTART\n\
+DTSTART;TZID=Europe/Berlin:not-a-date\n\
+DTEND;TZID=Europe/Berlin:20260427T100000\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("Can't parse datetime"));
+        assert!(error.msg.contains("DTSTART"));
+    }
+
+    #[test]
+    fn malformed_timed_event_without_dtend_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:missing-dtend\n\
+SUMMARY:Missing DTEND\n\
+DTSTART;TZID=Europe/Berlin:20260427T090000\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("missing end time"));
+    }
+
+    #[test]
+    fn malformed_event_with_invalid_value_parameter_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:invalid-value\n\
+SUMMARY:Invalid VALUE\n\
+DTSTART;VALUE=DATETIME:20260427\n\
+DTEND;VALUE=DATE:20260428\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("VALUE parameter"));
+        assert!(error.msg.contains("DATETIME"));
+    }
+
+    #[test]
+    fn all_day_event_without_dtend_is_reported_for_that_day() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:single-day-all-day\n\
+SUMMARY:Single day all-day\n\
+DTSTART;VALUE=DATE:20260427\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let events = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].summary, "Single day all-day");
+        assert!(events[0].all_day);
+        assert_eq!(events[0].start_timestamp, events[0].end_timestamp);
     }
 
     #[test]

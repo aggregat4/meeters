@@ -51,10 +51,11 @@ fn get_events_for_interval(
     let mut filtered_events = events
         .into_iter()
         .filter(|e| {
-            // We check for events that are inside the interval OR overlap with the interval in some way
-            (e.start_timestamp > start_time && e.start_timestamp < end_time)
-                || (e.start_timestamp < start_time && e.end_timestamp > start_time)
-                || (e.start_timestamp < end_time && e.end_timestamp > end_time)
+            if e.all_day && e.start_timestamp == e.end_timestamp {
+                e.start_timestamp >= start_time && e.start_timestamp <= end_time
+            } else {
+                e.start_timestamp < end_time && e.end_timestamp > start_time
+            }
         })
         .collect::<Vec<_>>();
     filtered_events.sort_by(|a, b| Ord::cmp(&a.start_timestamp, &b.start_timestamp));
@@ -80,6 +81,20 @@ fn send_calendar_message(
     } else {
         true
     }
+}
+
+fn next_event_to_notify<'a>(
+    events: &'a [Event],
+    now: DateTime<Local>,
+    warning_time_seconds: i64,
+    last_notification_start_time: Option<DateTime<Tz>>,
+) -> Option<&'a Event> {
+    events.iter().find(|event| {
+        let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
+        time_distance_from_now.num_seconds() > 0
+            && time_distance_from_now.num_seconds() <= warning_time_seconds
+            && last_notification_start_time != Some(event.start_timestamp)
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -253,25 +268,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             // Notify once for the next event that starts within the configured warning window.
             let now = Local::now();
-            let potential_next_immediate_upcoming_event = last_events.iter().find(|event| {
-                let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
-                time_distance_from_now.num_seconds() > 0
-                    && time_distance_from_now.num_seconds() <= event_warning_time_seconds
-            });
-            if let Some(next_immediate_upcoming_event) = potential_next_immediate_upcoming_event {
-                if last_notification_start_time.is_none()
-                    || next_immediate_upcoming_event.start_timestamp
-                        != last_notification_start_time.unwrap()
-                {
-                    if !send_calendar_message(
-                        &events_sender,
-                        EventNotification(next_immediate_upcoming_event.clone()),
-                    ) {
-                        break;
-                    }
-                    last_notification_start_time =
-                        Some(next_immediate_upcoming_event.start_timestamp);
+            if let Some(next_immediate_upcoming_event) = next_event_to_notify(
+                &last_events,
+                now,
+                event_warning_time_seconds,
+                last_notification_start_time,
+            ) {
+                if !send_calendar_message(
+                    &events_sender,
+                    EventNotification(next_immediate_upcoming_event.clone()),
+                ) {
+                    break;
                 }
+                last_notification_start_time = Some(next_immediate_upcoming_event.start_timestamp);
             }
             thread::sleep(std::time::Duration::from_secs(5));
         }
@@ -280,4 +289,168 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run the GUI main loop
     gui::run_gui_main_loop();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn berlin_datetime(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> DateTime<Tz> {
+        chrono_tz::Europe::Berlin
+            .with_ymd_and_hms(year, month, day, hour, minute, 0)
+            .unwrap()
+    }
+
+    fn event(summary: &str, start_timestamp: DateTime<Tz>, end_timestamp: DateTime<Tz>) -> Event {
+        Event {
+            summary: summary.to_string(),
+            description: String::new(),
+            location: String::new(),
+            meeturl: None,
+            all_day: false,
+            start_timestamp,
+            end_timestamp,
+        }
+    }
+
+    fn all_day_event(
+        summary: &str,
+        start_timestamp: DateTime<Tz>,
+        end_timestamp: DateTime<Tz>,
+    ) -> Event {
+        Event {
+            all_day: true,
+            ..event(summary, start_timestamp, end_timestamp)
+        }
+    }
+
+    fn filter_summaries(events: Vec<Event>) -> Vec<String> {
+        let start = berlin_datetime(2026, 4, 27, 0, 0);
+        let end = berlin_datetime(2026, 4, 27, 23, 59);
+
+        get_events_for_interval(events, start, end)
+            .into_iter()
+            .map(|event| event.summary)
+            .collect()
+    }
+
+    #[test]
+    fn interval_filter_includes_events_starting_at_interval_start() {
+        let summaries = filter_summaries(vec![event(
+            "starts at boundary",
+            berlin_datetime(2026, 4, 27, 0, 0),
+            berlin_datetime(2026, 4, 27, 1, 0),
+        )]);
+
+        assert_eq!(summaries, vec!["starts at boundary"]);
+    }
+
+    #[test]
+    fn interval_filter_excludes_events_ending_at_interval_start() {
+        let summaries = filter_summaries(vec![event(
+            "ends at boundary",
+            berlin_datetime(2026, 4, 26, 23, 0),
+            berlin_datetime(2026, 4, 27, 0, 0),
+        )]);
+
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn interval_filter_excludes_events_starting_at_interval_end() {
+        let summaries = filter_summaries(vec![event(
+            "starts after day",
+            berlin_datetime(2026, 4, 27, 23, 59),
+            berlin_datetime(2026, 4, 28, 1, 0),
+        )]);
+
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn interval_filter_includes_events_crossing_midnight_into_interval() {
+        let summaries = filter_summaries(vec![event(
+            "crosses midnight",
+            berlin_datetime(2026, 4, 26, 23, 30),
+            berlin_datetime(2026, 4, 27, 0, 30),
+        )]);
+
+        assert_eq!(summaries, vec!["crosses midnight"]);
+    }
+
+    #[test]
+    fn interval_filter_includes_events_crossing_midnight_out_of_interval() {
+        let summaries = filter_summaries(vec![event(
+            "crosses out",
+            berlin_datetime(2026, 4, 27, 23, 30),
+            berlin_datetime(2026, 4, 28, 0, 30),
+        )]);
+
+        assert_eq!(summaries, vec!["crosses out"]);
+    }
+
+    #[test]
+    fn interval_filter_includes_single_day_zero_duration_all_day_events() {
+        let summaries = filter_summaries(vec![all_day_event(
+            "all day",
+            berlin_datetime(2026, 4, 27, 0, 0),
+            berlin_datetime(2026, 4, 27, 0, 0),
+        )]);
+
+        assert_eq!(summaries, vec!["all day"]);
+    }
+
+    #[test]
+    fn interval_filter_sorts_events_by_start_time() {
+        let summaries = filter_summaries(vec![
+            event(
+                "later",
+                berlin_datetime(2026, 4, 27, 11, 0),
+                berlin_datetime(2026, 4, 27, 12, 0),
+            ),
+            event(
+                "earlier",
+                berlin_datetime(2026, 4, 27, 9, 0),
+                berlin_datetime(2026, 4, 27, 10, 0),
+            ),
+        ]);
+
+        assert_eq!(summaries, vec!["earlier", "later"]);
+    }
+
+    #[test]
+    fn notification_candidate_selects_next_event_inside_warning_window() {
+        let now = berlin_datetime(2026, 4, 27, 9, 0).with_timezone(&Local);
+        let candidate = event(
+            "candidate",
+            berlin_datetime(2026, 4, 27, 9, 0) + chrono::Duration::seconds(30),
+            berlin_datetime(2026, 4, 27, 9, 30),
+        );
+        let too_late = event(
+            "too late",
+            berlin_datetime(2026, 4, 27, 9, 2),
+            berlin_datetime(2026, 4, 27, 9, 30),
+        );
+
+        let events = vec![candidate, too_late];
+        let selected = next_event_to_notify(&events, now, 60, None).unwrap();
+
+        assert_eq!(selected.summary, "candidate");
+    }
+
+    #[test]
+    fn notification_candidate_skips_already_notified_event() {
+        let now = berlin_datetime(2026, 4, 27, 9, 0).with_timezone(&Local);
+        let already_notified = event(
+            "already notified",
+            berlin_datetime(2026, 4, 27, 9, 0) + chrono::Duration::seconds(30),
+            berlin_datetime(2026, 4, 27, 9, 30),
+        );
+        let last_notification_start_time = Some(already_notified.start_timestamp);
+        let events = vec![already_notified];
+
+        let selected = next_event_to_notify(&events, now, 60, last_notification_start_time);
+
+        assert!(selected.is_none());
+    }
 }
