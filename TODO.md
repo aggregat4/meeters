@@ -36,10 +36,10 @@
 
 ## 6. Improve runtime logging
 
-- [ ] Replace ad hoc `println!` and `eprintln!` calls with `log` or `tracing`.
-- [ ] Add log levels for normal refresh status, parse failures, notification failures, D-Bus startup, and icon state transitions.
-- [ ] Keep default output quiet enough for normal desktop autostart use.
-- [ ] Consider exposing verbose logging through an env var.
+- [x] Replace ad hoc `println!` and `eprintln!` calls with `log` or `tracing`.
+- [x] Add log levels for normal refresh status, parse failures, notification failures, D-Bus startup, and icon state transitions.
+- [x] Keep default output quiet enough for normal desktop autostart use.
+- [x] Consider exposing verbose logging through an env var.
 
 ## 7. Split `src/gui.rs` into focused modules
 

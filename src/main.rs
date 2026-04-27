@@ -17,6 +17,7 @@ mod custom_timezone;
 mod domain;
 mod gui;
 mod ical_util;
+mod logging;
 mod meeters_ical;
 mod timezones;
 mod windows_timezones;
@@ -24,7 +25,7 @@ mod windows_timezones;
 use std::sync::Arc;
 
 fn get_ical(url: &str) -> Result<String, CalendarError> {
-    println!("trying to fetch ical");
+    log::debug!("fetching calendar data");
     let config = Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(5)))
         .build();
@@ -74,7 +75,7 @@ fn send_calendar_message(
     message: CalendarMessages,
 ) -> bool {
     if let Err(e) = sender.send_blocking(message) {
-        eprintln!("Could not dispatch calendar message to GUI thread: {}", e);
+        log::error!("could not dispatch calendar message to GUI thread: {}", e);
         false
     } else {
         true
@@ -82,8 +83,10 @@ fn send_calendar_message(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    logging::init_from_env();
+
     let config = Config::load()?;
-    println!("Local Timezone configured as {}", config.local_tz_iana);
+    log::info!("local timezone configured as {}", config.local_tz_iana);
 
     let local_tz = config.local_tz;
     let ical_url = config.ical_url.clone();
@@ -146,7 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        eprintln!("Calendar GUI message channel closed");
+        log::warn!("calendar GUI message channel closed");
     });
 
     // Handle D-Bus requests in the main GTK thread
@@ -166,7 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => (),
             }
         }
-        eprintln!("D-Bus GUI message channel closed");
+        log::warn!("D-Bus GUI message channel closed");
     });
 
     // start the background thread for calendar work
@@ -189,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut state = refresh_state.lock().unwrap();
                             state.record_success(events.len());
                         }
-                        println!("Successfully got {:?} events", events.len());
+                        log::info!("successfully got {} events", events.len());
                         let local_date = Local::now().date_naive();
 
                         // Get events for each day
@@ -220,7 +223,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .unwrap();
                             let day_events_list =
                                 get_events_for_interval(events.clone(), day_start, day_end);
-                            println!(
+                            log::debug!(
                                 "There are {} events for day {}: {:?}",
                                 day_events_list.len(),
                                 day_offset,
@@ -244,7 +247,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if !send_calendar_message(&events_sender, RefreshStateChanged) {
                             break;
                         }
-                        eprintln!("Error getting events: {:?}", e.msg);
+                        log::error!("error getting events: {}", e.msg);
                     }
                 }
             }

@@ -846,6 +846,7 @@ dependencies = [
  "ical",
  "lazy_static",
  "libappindicator",
+ "log",
  "maplit",
  "multimap",
  "notify-rust",

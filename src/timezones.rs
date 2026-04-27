@@ -99,7 +99,7 @@ fn parse_ical_timezone(
                 name: unescaped_name.clone(),
                 timespanset: parse_timespansets(vtimezone, local_tz)?, // pass on the error
             };
-            println!(
+            log::debug!(
                 "Parsed custom timezone definition '{:?}' with '{:?}' spans",
                 timezone.name,
                 timezone.timespanset.rest.len()

@@ -765,7 +765,10 @@ mod tests {
     // https://github.com/fmeringdal/rust_rrule/issues/5
     #[test]
     fn rruleset_monthly_first_wednesday() {
-        println!("{:?}", "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE".parse::<RRuleSet>().unwrap().all());
+        "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE"
+            .parse::<RRuleSet>()
+            .unwrap()
+            .all();
     }
 
     #[test]
@@ -776,7 +779,9 @@ mod tests {
     #[test]
     fn rrule_all_missing_final_meeting() {
         //println!("{:?}", "DTSTART;TZID=W. Europe Standard Time:20210316T113000\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20210406T113000,20210504T11300\n0UID:040000008200E00074C5B7101A82E0080000000000EB5C2C7B0FD701000000000000000\n 010000000E4ADD290686A07499DF2A0FAB11D79E9".parse::<RRuleSet>().unwrap().all());
-        println!("{:?}", "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO".parse::<RRuleSet>().unwrap());
+        "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO"
+            .parse::<RRuleSet>()
+            .unwrap();
     }
 
     #[test]

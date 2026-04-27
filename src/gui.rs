@@ -141,7 +141,7 @@ pub fn create_indicator() -> AppIndicator {
 pub fn open_meeting(meet_url: &str) {
     match gtk::show_uri_on_window(None::<&gtk::Window>, meet_url, gtk::current_event_time()) {
         Ok(_) => (),
-        Err(e) => eprintln!("Error trying to open the meeting URL: {}", e),
+        Err(e) => log::error!("error trying to open the meeting URL: {}", e),
     }
 }
 
@@ -835,13 +835,13 @@ pub fn create_indicator_menu(
     m.append(&mi);
     m.show_all();
     if refresh_state.last_update_successful == Some(false) {
-        println!("calendar refresh failed");
+        log::warn!("calendar refresh failed");
         set_error_icon(indicator);
     } else if nof_upcoming_meetings > 0 {
-        println!("some meetings upcoming");
+        log::debug!("some meetings upcoming");
         set_some_meetings_left_icon(indicator);
     } else {
-        println!("NO meetings upcoming");
+        log::debug!("no meetings upcoming");
         set_no_meetings_left_icon(indicator);
     }
     indicator.set_menu(&mut m);
@@ -881,8 +881,8 @@ pub fn show_event_notification(event: Event) {
                     open_meeting(meeting);
                 }
             });
-    } else if let Err(_) = notification.show() {
-        println!("Could not show notification");
+    } else if let Err(e) = notification.show() {
+        log::warn!("could not show notification: {}", e);
     }
 }
 
@@ -918,10 +918,12 @@ pub fn initialize_gui(
     )));
 
     // Set up D-Bus connection
+    log::info!("starting D-Bus integration");
     let connection = Connection::new_session().expect("Failed to connect to D-Bus");
     connection
         .request_name("net.aggregat4.Meeters", false, true, false)
         .expect("Failed to request D-Bus name");
+    log::debug!("D-Bus name net.aggregat4.Meeters acquired");
 
     // Create a channel for D-Bus requests using async-channel
     let (dbus_sender, dbus_receiver) = async_channel::bounded(10);
@@ -938,7 +940,7 @@ pub fn initialize_gui(
             let show_sender = show_sender.clone();
             b.method("ShowWindow", (), (), move |_, _, ()| {
                 if let Err(e) = show_sender.send_blocking(("show".to_string(), ())) {
-                    eprintln!("Could not dispatch D-Bus show action to GUI thread: {}", e);
+                    log::error!("could not dispatch D-Bus show action to GUI thread: {}", e);
                 }
                 Ok(())
             });
@@ -946,7 +948,7 @@ pub fn initialize_gui(
             let close_sender = close_sender.clone();
             b.method("CloseWindow", (), (), move |_, _, ()| {
                 if let Err(e) = close_sender.send_blocking(("close".to_string(), ())) {
-                    eprintln!("Could not dispatch D-Bus close action to GUI thread: {}", e);
+                    log::error!("could not dispatch D-Bus close action to GUI thread: {}", e);
                 }
                 Ok(())
             });
@@ -954,8 +956,8 @@ pub fn initialize_gui(
             let toggle_sender = toggle_sender.clone();
             b.method("ToggleWindow", (), (), move |_, _, ()| {
                 if let Err(e) = toggle_sender.send_blocking(("toggle".to_string(), ())) {
-                    eprintln!(
-                        "Could not dispatch D-Bus toggle action to GUI thread: {}",
+                    log::error!(
+                        "could not dispatch D-Bus toggle action to GUI thread: {}",
                         e
                     );
                 }
