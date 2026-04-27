@@ -18,10 +18,11 @@ use crate::domain::{Event, RefreshState};
 const HOUR_HEIGHT: i32 = 80; // Height for one hour
 
 const TEXT_PRIMARY: &str = "#242a31";
-const TEXT_MUTED: &str = "#5f6873";
+const TEXT_SUBTLE: &str = "#75808c";
 const TIMELINE_BACKGROUND: &str = "#fbfaf7";
 const TIMELINE_GRID: &str = "rgba(74, 83, 94, 0.14)";
 const TIMELINE_GRID_STRONG: &str = "rgba(74, 83, 94, 0.28)";
+const TIMELINE_RAIL: &str = "rgba(74, 83, 94, 0.18)";
 const CURRENT_TIME_MARKER: &str = "rgba(218, 55, 48, 0.72)";
 
 struct EventPalette {
@@ -37,9 +38,16 @@ fn load_css(style_context: &gtk::StyleContext, css: &str) {
 }
 
 fn style_label(label: &gtk::Label, color: &str) {
+    style_label_with_css(label, color, "");
+}
+
+fn style_label_with_css(label: &gtk::Label, color: &str, extra_css: &str) {
     load_css(
         &label.style_context(),
-        &format!("label {{ color: {}; text-shadow: none; }}", color),
+        &format!(
+            "label {{ color: {}; text-shadow: none; {} }}",
+            color, extra_css
+        ),
     );
 }
 
@@ -356,22 +364,22 @@ impl TimelineView {
             .partition(|e| e.start_timestamp.time() == e.end_timestamp.time());
 
         // Create all-day events section - always show it for consistent spacing
-        let all_day_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        all_day_container.set_margin_bottom(12);
+        let all_day_container = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        all_day_container.set_margin_bottom(if all_day_events.is_empty() { 6 } else { 12 });
 
         // Add "All Day" label
         let all_day_label = gtk::Label::new(Some("All Day"));
         all_day_label.set_xalign(0.0);
-        all_day_label.set_margin_bottom(4);
+        all_day_label.set_margin_bottom(2);
         all_day_label.set_markup("All Day");
-        style_label(&all_day_label, TEXT_PRIMARY);
+        style_label_with_css(&all_day_label, TEXT_SUBTLE, "font-size: 13px;");
         all_day_container.pack_start(&all_day_label, false, false, 0);
 
         // Create horizontal box for all-day events
         let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
 
         // Set a minimum height for the all-day events box to ensure consistent spacing
-        all_day_events_box.set_size_request(-1, 40);
+        all_day_events_box.set_size_request(-1, if all_day_events.is_empty() { 12 } else { 40 });
 
         // Calculate button width based on number of events
         let available_width = 600; // Match the timeline width
@@ -418,6 +426,17 @@ impl TimelineView {
         load_css(&background_box.style_context(), &css);
         meeting_area.put(&background_box, 0, 0);
 
+        let timeline_rail = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        timeline_rail.set_size_request(2, (end_hour - start_hour) * HOUR_HEIGHT);
+        load_css(
+            &timeline_rail.style_context(),
+            &format!(
+                "box {{ background-color: {}; margin: 0; padding: 0; }}",
+                TIMELINE_RAIL
+            ),
+        );
+        meeting_area.put(&timeline_rail, 0, 0);
+
         // Add hour markers and grid lines
         for hour in start_hour..=end_hour {
             let y_position = (hour - start_hour) * HOUR_HEIGHT;
@@ -426,7 +445,7 @@ impl TimelineView {
             let label = gtk::Label::new(Some(&format!("{:02}:00", hour)));
             label.set_xalign(1.0);
             label.set_margin_end(5);
-            style_label(&label, TEXT_MUTED);
+            style_label_with_css(&label, TEXT_SUBTLE, "font-size: 13px;");
             time_column.put(&label, 0, y_position);
 
             // Hour separator with styling
@@ -525,6 +544,17 @@ impl TimelineView {
                 );
 
                 meeting_area.put(&current_time_marker, 0, y_position);
+
+                let current_time_cap = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                current_time_cap.set_size_request(8, 8);
+                load_css(
+                    &current_time_cap.style_context(),
+                    &format!(
+                        "box {{ background-color: {}; border-radius: 4px; margin: 0; padding: 0; }}",
+                        CURRENT_TIME_MARKER
+                    ),
+                );
+                meeting_area.put(&current_time_cap, 0, y_position - 3);
             }
         }
 
@@ -638,7 +668,7 @@ impl WindowManager {
             // Make the day label bold
             let markup = format!("<b>{}</b>", label_text);
             day_label.set_markup(&markup);
-            style_label(&day_label, TEXT_PRIMARY);
+            style_label_with_css(&day_label, TEXT_PRIMARY, "font-size: 15px;");
 
             day_box.pack_start(&day_label, false, false, 0);
 
@@ -711,7 +741,7 @@ impl WindowManager {
                     // Make the day label bold
                     let markup = format!("<b>{}</b>", label_text);
                     day_label.set_markup(&markup);
-                    style_label(&day_label, TEXT_PRIMARY);
+                    style_label_with_css(&day_label, TEXT_PRIMARY, "font-size: 15px;");
 
                     day_box.pack_start(&day_label, false, false, 0);
 
