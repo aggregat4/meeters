@@ -1,18 +1,18 @@
-use std::path::PathBuf;
 use std::thread;
 
 use chrono::prelude::*;
 use chrono_tz::Tz;
-use directories::ProjectDirs;
 use gtk::prelude::*;
 use ureq::Agent;
 
+use crate::config::Config;
 use crate::domain::{Event, RefreshState};
 use crate::CalendarMessages::{DayEvents, EventNotification, RefreshStateChanged};
 use domain::CalendarError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod binary_search;
+mod config;
 mod custom_timezone;
 mod domain;
 mod gui;
@@ -42,25 +42,6 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
         })
 }
 
-fn get_config_directory() -> PathBuf {
-    ProjectDirs::from("net", "aggregat4", "meeters")
-        .expect("Project directory must be available")
-        .config_dir()
-        .to_path_buf()
-}
-
-fn load_config() -> std::io::Result<()> {
-    let config_file = get_config_directory().join("meeters_config.env");
-    if !config_file.exists() {
-        panic!(
-            "Require the project configuration file to be present at {}",
-            config_file.to_str().unwrap()
-        );
-    }
-    dotenvy::from_path(config_file).expect("Can not load configuration file meeters_config.env");
-    Ok(())
-}
-
 fn get_events_for_interval(
     events: Vec<Event>,
     start_time: DateTime<Tz>,
@@ -79,16 +60,6 @@ fn get_events_for_interval(
     filtered_events
 }
 
-/// Time between two ical calendar download in milliseconds
-const DEFAULT_POLLING_INTERVAL_MS: u128 = 2 * 60 * 1000;
-/// The amount of time in seconds we want to be warned before the meeting starts
-const DEFAULT_EVENT_WARNING_TIME_SECONDS: i64 = 60;
-/// Default start hour for the timeline view (8 AM)
-const DEFAULT_START_HOUR: i32 = 8;
-/// Default end hour for the timeline view (8 PM)
-const DEFAULT_END_HOUR: i32 = 20;
-/// Default number of future days to show (1 = today + tomorrow)
-const DEFAULT_FUTURE_DAYS: i32 = 1;
 /// Number of refresh attempts kept in the in-memory tray log
 const REFRESH_LOG_CAPACITY: usize = 100;
 
@@ -98,55 +69,17 @@ enum CalendarMessages {
     RefreshStateChanged,
 }
 
-fn default_tz(_: dotenvy::Error) -> Result<String, dotenvy::Error> {
-    Ok("Europe/Berlin".to_string())
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    load_config()?;
+    let config = Config::load()?;
+    println!("Local Timezone configured as {}", config.local_tz_iana);
 
-    // Parse config
-    let local_tz_iana: String = dotenvy::var("MEETERS_LOCAL_TIMEZONE")
-        .or_else(default_tz)
-        .unwrap();
-    let local_tz: Tz = local_tz_iana
-        .parse()
-        .expect("Expecting to be able to parse the local timezone, instead got an error");
-    let config_ical_url = dotenvy::var("MEETERS_ICAL_URL")
-        .expect("Expecting a configuration property with name MEETERS_ICAL_URL");
-    let config_show_event_notification: bool = match dotenvy::var("MEETERS_EVENT_NOTIFICATION") {
-        Ok(val) => val.parse::<bool>().expect(
-            "Value for MEETERS_EVENT_NOTIFICATION configuration parameter must be a boolean",
-        ),
-        Err(_) => true,
-    };
-    let config_use_zoommtg: bool = match dotenvy::var("MEETERS_USE_ZOOMMTG") {
-        Ok(val) => val
-            .parse::<bool>()
-            .expect("Value for MEETERS_USE_ZOOMMTG configuration parameter must be a boolean"),
-        Err(_) => false,
-    };
-    let config_polling_interval_ms: u128 = match dotenvy::var("MEETERS_POLLING_INTERVAL_MS") {
-        Ok(val) => val.parse::<u128>().expect("MEETERS_POLLING_INTERVAL_MS must be a positive integer expressing the polling interval in milliseconds"),
-        Err(_) => DEFAULT_POLLING_INTERVAL_MS
-    };
-    let config_event_warning_time_seconds: i64 = match dotenvy::var("MEETERS_EVENT_WARNING_TIME_SECONDS") {
-        Ok(val) => val.parse::<i64>().expect("MEETERS_EVENT_WARNING_TIME_SECONDS must be a positive integer expressing the polling interval in seconds"),
-        Err(_) => DEFAULT_EVENT_WARNING_TIME_SECONDS
-    };
-    let config_start_hour: i32 = match dotenvy::var("MEETERS_TODAY_START_HOUR") {
-        Ok(val) => val.parse::<i32>().expect("MEETERS_TODAY_START_HOUR defines the start hour of the today view,must be a positive integer between 0 and 23"),
-        Err(_) => DEFAULT_START_HOUR
-    };
-    let config_end_hour: i32 = match dotenvy::var("MEETERS_TODAY_END_HOUR") {
-        Ok(val) => val.parse::<i32>().expect("MEETERS_TODAY_END_HOUR defines the end hour of the today view, must be a positive integer between 0 and 23"),
-        Err(_) => DEFAULT_END_HOUR
-    };
-    let config_future_days: i32 = match dotenvy::var("MEETERS_FUTURE_DAYS") {
-        Ok(val) => val.parse::<i32>().expect("MEETERS_FUTURE_DAYS defines the number of future days to show in addition to today, must be a positive integer"),
-        Err(_) => DEFAULT_FUTURE_DAYS
-    };
-    println!("Local Timezone configured as {}", local_tz_iana.clone());
+    let local_tz = config.local_tz;
+    let ical_url = config.ical_url.clone();
+    let show_event_notification = config.show_event_notification;
+    let use_zoommtg = config.use_zoommtg;
+    let polling_interval_ms = config.polling_interval_ms;
+    let event_warning_time_seconds = config.event_warning_time_seconds;
+    let future_days = config.future_days;
 
     let refresh_state = Arc::new(std::sync::Mutex::new(RefreshState::new(
         REFRESH_LOG_CAPACITY,
@@ -154,9 +87,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize GUI components
     let (mut indicator, window_manager, dbus_receiver) = gui::initialize_gui(
-        config_start_hour,
-        config_end_hour,
-        config_future_days,
+        config.start_hour,
+        config.end_hour,
+        config.future_days,
         Arc::clone(&refresh_state),
     );
 
@@ -186,7 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 EventNotification(event) => {
-                    if config_show_event_notification {
+                    if show_event_notification {
                         gui::show_event_notification(event);
                     }
                 }
@@ -238,12 +171,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .duration_since(UNIX_EPOCH)
                 .expect("Time must flow")
                 .as_millis();
-            if last_download_time == 0
-                || current_time - last_download_time > config_polling_interval_ms
-            {
+            if last_download_time == 0 || current_time - last_download_time > polling_interval_ms {
                 last_download_time = current_time;
-                match get_ical(&config_ical_url)
-                    .and_then(|t| meeters_ical::extract_events(&t, &local_tz, config_use_zoommtg))
+                match get_ical(&ical_url)
+                    .and_then(|t| meeters_ical::extract_events(&t, &local_tz, use_zoommtg))
                 {
                     Ok(events) => {
                         {
@@ -257,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut day_events = Vec::new();
 
                         // Process each day
-                        for day_offset in 0..=config_future_days {
+                        for day_offset in 0..=future_days {
                             let day_date = local_date + chrono::Duration::days(day_offset as i64);
                             let day_start = local_tz
                                 .with_ymd_and_hms(
@@ -311,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let potential_next_immediate_upcoming_event = last_events.iter().find(|event| {
                 let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
                 time_distance_from_now.num_seconds() > 0
-                    && time_distance_from_now.num_seconds() <= config_event_warning_time_seconds
+                    && time_distance_from_now.num_seconds() <= event_warning_time_seconds
             });
             if let Some(next_immediate_upcoming_event) = potential_next_immediate_upcoming_event {
                 if last_notification_start_time.is_none()

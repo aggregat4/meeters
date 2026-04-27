@@ -9,11 +9,11 @@
 
 ## 2. Centralize configuration parsing and validation
 
-- [ ] Introduce a `Config` struct, likely in `src/main.rs` first or a new `src/config.rs` module if it grows.
-- [ ] Move all `dotenvy::var(...)` parsing into `Config::load() -> Result<Config, ...>`.
-- [ ] Validate value ranges instead of only parse types: `MEETERS_TODAY_START_HOUR` and `MEETERS_TODAY_END_HOUR` must be `0..=23`, `start_hour < end_hour`, `MEETERS_FUTURE_DAYS >= 0`, polling interval > 0, warning time >= 0.
-- [ ] Return actionable errors instead of panicking for invalid config.
-- [ ] Add focused unit tests for defaults, valid overrides, invalid booleans, invalid hour ranges, and invalid future day counts.
+- [x] Introduce a `Config` struct, likely in `src/main.rs` first or a new `src/config.rs` module if it grows.
+- [x] Move all `dotenvy::var(...)` parsing into `Config::load() -> Result<Config, ...>`.
+- [x] Validate value ranges instead of only parse types: `MEETERS_TODAY_START_HOUR` and `MEETERS_TODAY_END_HOUR` must be `0..=23`, `start_hour < end_hour`, `MEETERS_FUTURE_DAYS >= 0`, polling interval > 0, warning time >= 0.
+- [x] Return actionable errors instead of panicking for invalid config.
+- [x] Add focused unit tests for defaults, valid overrides, invalid booleans, invalid hour ranges, and invalid future day counts.
 
 ## 3. Extract duplicated day view construction
 
