@@ -69,6 +69,18 @@ enum CalendarMessages {
     RefreshStateChanged,
 }
 
+fn send_calendar_message(
+    sender: &async_channel::Sender<CalendarMessages>,
+    message: CalendarMessages,
+) -> bool {
+    if let Err(e) = sender.send_blocking(message) {
+        eprintln!("Could not dispatch calendar message to GUI thread: {}", e);
+        false
+    } else {
+        true
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load()?;
     println!("Local Timezone configured as {}", config.local_tz_iana);
@@ -97,10 +109,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (events_sender, events_receiver) = async_channel::bounded::<CalendarMessages>(10);
     let window_manager_clone = Arc::clone(&window_manager);
 
-    // Set up a periodic check for event messages
-    let events_receiver_clone = events_receiver.clone();
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        while let Ok(event_message) = events_receiver_clone.try_recv() {
+    glib::MainContext::default().spawn_local(async move {
+        while let Ok(event_message) = events_receiver.recv().await {
             match event_message {
                 DayEvents(day_events) => {
                     // Update window manager with new events
@@ -136,16 +146,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        glib::ControlFlow::Continue
+        eprintln!("Calendar GUI message channel closed");
     });
 
     // Handle D-Bus requests in the main GTK thread
     let window_manager_clone = Arc::clone(&window_manager);
-    let dbus_receiver_clone = dbus_receiver.clone();
 
-    // Set up a periodic check for D-Bus messages
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        while let Ok((action, _)) = dbus_receiver_clone.try_recv() {
+    glib::MainContext::default().spawn_local(async move {
+        while let Ok((action, _)) = dbus_receiver.recv().await {
             let mut wm = window_manager_clone.lock().unwrap();
             match action.as_str() {
                 "show" => wm.show_window(),
@@ -158,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => (),
             }
         }
-        glib::ControlFlow::Continue
+        eprintln!("D-Bus GUI message channel closed");
     });
 
     // start the background thread for calendar work
@@ -224,14 +232,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // Store today's events for notifications
                         last_events = day_events[0].clone();
 
-                        events_sender.send_blocking(DayEvents(day_events)).unwrap();
+                        if !send_calendar_message(&events_sender, DayEvents(day_events)) {
+                            break;
+                        }
                     }
                     Err(e) => {
                         {
                             let mut state = refresh_state.lock().unwrap();
                             state.record_failure(e.msg.clone());
                         }
-                        events_sender.send_blocking(RefreshStateChanged).unwrap();
+                        if !send_calendar_message(&events_sender, RefreshStateChanged) {
+                            break;
+                        }
                         eprintln!("Error getting events: {:?}", e.msg);
                     }
                 }
@@ -249,9 +261,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || next_immediate_upcoming_event.start_timestamp
                         != last_notification_start_time.unwrap()
                 {
-                    events_sender
-                        .send_blocking(EventNotification(next_immediate_upcoming_event.clone()))
-                        .unwrap();
+                    if !send_calendar_message(
+                        &events_sender,
+                        EventNotification(next_immediate_upcoming_event.clone()),
+                    ) {
+                        break;
+                    }
                     last_notification_start_time =
                         Some(next_immediate_upcoming_event.start_timestamp);
                 }

@@ -937,23 +937,28 @@ pub fn initialize_gui(
         cr.register("net.aggregat4.Meeters", move |b| {
             let show_sender = show_sender.clone();
             b.method("ShowWindow", (), (), move |_, _, ()| {
-                show_sender.send_blocking(("show".to_string(), ())).unwrap();
+                if let Err(e) = show_sender.send_blocking(("show".to_string(), ())) {
+                    eprintln!("Could not dispatch D-Bus show action to GUI thread: {}", e);
+                }
                 Ok(())
             });
 
             let close_sender = close_sender.clone();
             b.method("CloseWindow", (), (), move |_, _, ()| {
-                close_sender
-                    .send_blocking(("close".to_string(), ()))
-                    .unwrap();
+                if let Err(e) = close_sender.send_blocking(("close".to_string(), ())) {
+                    eprintln!("Could not dispatch D-Bus close action to GUI thread: {}", e);
+                }
                 Ok(())
             });
 
             let toggle_sender = toggle_sender.clone();
             b.method("ToggleWindow", (), (), move |_, _, ()| {
-                toggle_sender
-                    .send_blocking(("toggle".to_string(), ()))
-                    .unwrap();
+                if let Err(e) = toggle_sender.send_blocking(("toggle".to_string(), ())) {
+                    eprintln!(
+                        "Could not dispatch D-Bus toggle action to GUI thread: {}",
+                        e
+                    );
+                }
                 Ok(())
             });
         })

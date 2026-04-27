@@ -29,10 +29,10 @@
 
 ## 5. Replace GUI-thread channel polling with GLib-friendly event delivery
 
-- [ ] Replace the 100ms `glib::timeout_add_local` polling loops for calendar messages and D-Bus messages in `src/main.rs`.
-- [ ] Investigate `glib::MainContext::channel`, `invoke`, or another GTK-main-thread-safe dispatch mechanism compatible with the current GTK/glib versions.
-- [ ] Keep all GTK mutation on the GTK main thread.
-- [ ] Add graceful handling for closed channels instead of assuming `send_blocking(...).unwrap()` always succeeds.
+- [x] Replace the 100ms `glib::timeout_add_local` polling loops for calendar messages and D-Bus messages in `src/main.rs`.
+- [x] Investigate `glib::MainContext::channel`, `invoke`, or another GTK-main-thread-safe dispatch mechanism compatible with the current GTK/glib versions. Use `async_channel::Receiver::recv().await` inside `glib::MainContext::spawn_local`, because this glib version deprecates `MainContext::channel` in favor of async-channel on the main context.
+- [x] Keep all GTK mutation on the GTK main thread.
+- [x] Add graceful handling for closed channels instead of assuming `send_blocking(...).unwrap()` always succeeds.
 
 ## 6. Improve runtime logging
 
