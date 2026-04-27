@@ -4,6 +4,7 @@ use crate::timezones::parse_ical_timezones;
 use crate::timezones::parse_tzid;
 use chrono::prelude::*;
 use chrono::Duration;
+use chrono::LocalResult;
 use chrono_tz::{Tz, UTC};
 use either::{Either, Left};
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
@@ -20,6 +21,57 @@ use crate::ical_util::{
 };
 use multimap::MultiMap;
 
+fn calendar_error(msg: impl Into<String>) -> CalendarError {
+    CalendarError { msg: msg.into() }
+}
+
+fn property_value<'a>(prop: &'a Property, property_name: &str) -> Result<&'a str, CalendarError> {
+    prop.value
+        .as_deref()
+        .ok_or_else(|| calendar_error(format!("missing value for {} property", property_name)))
+}
+
+fn first_param_value<'a>(prop: &'a Property, param_name: &str) -> Option<&'a str> {
+    prop.params
+        .as_ref()
+        .and_then(|params| find_param(params, param_name))
+        .and_then(|values| values.first())
+        .map(String::as_str)
+}
+
+fn single_local_datetime<T: TimeZone>(
+    result: LocalResult<DateTime<T>>,
+    context: &str,
+) -> Result<DateTime<T>, CalendarError> {
+    match result {
+        LocalResult::Single(datetime) => Ok(datetime),
+        LocalResult::Ambiguous(_, _) => Err(calendar_error(format!(
+            "ambiguous local datetime while parsing {}",
+            context
+        ))),
+        LocalResult::None => Err(calendar_error(format!(
+            "nonexistent local datetime while parsing {}",
+            context
+        ))),
+    }
+}
+
+fn local_ymd_hms(
+    tz: &Tz,
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    context: &str,
+) -> Result<DateTime<Tz>, CalendarError> {
+    single_local_datetime(
+        tz.with_ymd_and_hms(year, month, day, hour, minute, second),
+        context,
+    )
+}
+
 /// Parses datetimes of the format 'YYYYMMDDTHHMMSS'
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.5>
@@ -29,27 +81,18 @@ fn parse_ical_datetime<T: TimeZone>(
     target_tz: &T,
 ) -> Result<DateTime<T>, CalendarError> {
     match NaiveDateTime::parse_from_str(datetime, "%Y%m%dT%H%M%S") {
-        Ok(d) => {
-            if tz.is_left() {
-                Ok(tz
-                    .left()
-                    .unwrap()
-                    .from_local_datetime(&d)
-                    .unwrap()
-                    .with_timezone(target_tz))
-            } else {
-                Ok(tz
-                    .right()
-                    .unwrap()
-                    .from_local_datetime(&d)
-                    .unwrap()
-                    .with_timezone(target_tz))
-            }
-            // println!(
-            //     "Converting timezones between {} and {}, which means {} to {}",
-            //     tz, target_tz, datetime, converted
-            // );
-        }
+        Ok(d) => match tz {
+            Either::Left(source_tz) => single_local_datetime(
+                source_tz.from_local_datetime(&d),
+                &format!("datetime {}", datetime),
+            )
+            .map(|datetime| datetime.with_timezone(target_tz)),
+            Either::Right(source_tz) => single_local_datetime(
+                source_tz.from_local_datetime(&d),
+                &format!("datetime {}", datetime),
+            )
+            .map(|datetime| datetime.with_timezone(target_tz)),
+        },
         Err(_) => Err(CalendarError {
             msg: "Can't parse datetime string with tzid".to_string(),
         }),
@@ -67,19 +110,18 @@ fn extract_ical_datetime(
     calendar_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
 ) -> Result<DateTime<Tz>, CalendarError> {
-    let date_time_str = prop.value.as_ref().unwrap();
-    if prop.params.is_some() && find_param(prop.params.as_ref().unwrap(), "TZID").is_some() {
+    let date_time_str = property_value(prop, &prop.name)?;
+    if let Some(tzid_value) = first_param_value(prop, "TZID") {
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // We are assuming there is only one value in the TZID param
-        let tzid = unescape_string(&find_param(prop.params.as_ref().unwrap(), "TZID").unwrap()[0]);
+        let tzid = unescape_string(tzid_value);
         // println!("We have a TZID: {}", tzid);
         match parse_tzid(&tzid, calendar_timezones) {
             Ok(timezone) => parse_ical_datetime(date_time_str, &timezone, local_tz),
-            // in case we can't parse the timezone ID we just default to local, also not optimal
-            Err(_) => {
-                // println!("We have an error parsing the source tzid");
-                parse_ical_datetime(date_time_str, &Left(*local_tz), local_tz)
-            }
+            Err(e) => Err(calendar_error(format!(
+                "error parsing TZID '{}' on {} property: {}",
+                tzid, prop.name, e
+            ))),
         }
     } else {
         // It is either
@@ -87,11 +129,10 @@ fn extract_ical_datetime(
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
             // println!("We assume UTC because of Z");
-            parse_ical_datetime(
-                date_time_str.strip_suffix('Z').unwrap(),
-                &Left(UTC),
-                local_tz,
-            )
+            let utc_datetime = date_time_str
+                .strip_suffix('Z')
+                .ok_or_else(|| calendar_error("UTC datetime marker could not be stripped"))?;
+            parse_ical_datetime(utc_datetime, &Left(UTC), local_tz)
         } else {
             // println!("We use the local timezone as the originating timezone");
             parse_ical_datetime(date_time_str, &Left(*local_tz), local_tz)
@@ -109,9 +150,16 @@ fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarErr
         // NOTE: we don't convert the datetime to the given timezone since we are talking about a
         // date that represents a particular _day_, not a time. Therefore we need to make sure that
         // we don't accidentally shift it into another day
-        Ok(d) => Ok(tz
-            .with_ymd_and_hms(d.year(), d.month(), d.day(), 0, 0, 0)
-            .unwrap()),
+        Ok(d) => local_ymd_hms(
+            tz,
+            d.year(),
+            d.month(),
+            d.day(),
+            0,
+            0,
+            0,
+            &format!("date {}", date),
+        ),
         Err(chrono_err) => Err(CalendarError {
             msg: format!(
                 "Can't parse date '{:?}' with cause: {:?}",
@@ -123,7 +171,7 @@ fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarErr
 }
 
 fn extract_ical_date(prop: &Property, local_tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
-    parse_ical_date_notz(prop.value.as_ref().unwrap(), local_tz)
+    parse_ical_date_notz(property_value(prop, &prop.name)?, local_tz)
 }
 
 /// This encapsulates the logic for parsing DTSTART and DTEND ical properties.
@@ -136,21 +184,24 @@ fn extract_start_end_time(
 ) -> Result<(DateTime<Tz>, DateTime<Tz>, bool), CalendarError> {
     // we assume that DTSTART is mandatory, the spec sort of says that but also mentions something called
     // a "METHOD", ignoring that
-    let start_property = find_property(&ical_event.properties, "DTSTART").unwrap();
+    let start_property = find_property(&ical_event.properties, "DTSTART")
+        .ok_or_else(|| calendar_error("missing DTSTART property for event"))?;
     let end_property = find_property(&ical_event.properties, "DTEND");
     // The start property can be a "date":
     //    in this case it has a param called VALUE with the value DATE
     // The start property can also be a "date-time":
     //    in this case it is a YYYYMMDDTHHMMSS string with optionally Z at the end for zulu time
     //    in the date-time case there is an (optional?) TZID param that specific the timezone as a string
-    if start_property.params.is_some()
-        && find_param(start_property.params.as_ref().unwrap(), "VALUE").is_some()
-    {
+    if let Some(value_param) = first_param_value(start_property, "VALUE") {
         // println!("Have a basic date without timezone datetime");
         // the first real value of the VALUE param should be "DATE"
-        let value_param = &find_param(start_property.params.as_ref().unwrap(), "VALUE").unwrap()[0];
         if value_param != "DATE" {
-            return Err(CalendarError{ msg: format!("Encountered DTSTART with a VALUE parameter that has a value different from 'DATE': {}", value_param) });
+            return Err(CalendarError {
+                msg: format!(
+                    "Encountered DTSTART with a VALUE parameter that has a value different from 'DATE': {}",
+                    value_param
+                ),
+            });
         }
         // start property is a "DATE", which indicates a whole day or multi day event
         // see https://tools.ietf.org/html/rfc5545#section-3.6.1 and specifically the discussion on DTSTART
@@ -194,7 +245,10 @@ pub fn convert_to_zoommtg(url: &str) -> Option<String> {
         .unwrap();
     }
     ZOOM_URL_CONVERT_REGEX.captures(url).map(|caps| {
-        let id = caps.name("id").unwrap().as_str();
+        let id = caps
+            .name("id")
+            .expect("zoom conversion regex must include an id capture")
+            .as_str();
         let pwd = caps.name("pwd").map(|m| m.as_str()).unwrap_or("");
         if pwd.is_empty() {
             format!("zoommtg://zoom.us/join?confno={}", id)
@@ -255,7 +309,7 @@ fn strip_param(p: &Property, param_name: &str) -> (Property, Option<String>) {
                     if param.0 != param_name {
                         true
                     } else {
-                        removed_param_value = Some(param.1[0].clone());
+                        removed_param_value = param.1.first().cloned();
                         false
                     }
                 })
@@ -300,14 +354,18 @@ fn parse_occurrences(
         return Ok(vec![]);
     }
     // some preliminary data wrangling so the actual handling of all the cases is easier afterwards
-    let dtstart_prop = maybe_dtstart_prop.unwrap();
-    let dtstart_time_str = dtstart_prop.value.as_ref().unwrap();
+    let dtstart_prop = maybe_dtstart_prop
+        .ok_or_else(|| calendar_error("missing DTSTART property while parsing RRULE"))?;
+    let dtstart_time_str = property_value(dtstart_prop, "DTSTART")?;
     let maybe_tzid_param = dtstart_prop
         .params
         .as_ref()
         .and_then(|params| find_param(params, "TZID"));
     let maybe_original_tz = if let Some(tzid_param) = maybe_tzid_param {
-        let unescaped_tzid = unescape_string(&tzid_param[0]);
+        let tzid_value = tzid_param
+            .first()
+            .ok_or_else(|| calendar_error("TZID parameter on DTSTART has no value"))?;
+        let unescaped_tzid = unescape_string(tzid_value);
         match parse_tzid(&unescaped_tzid, custom_timezones) {
             Ok(original_tz) => Some(original_tz),
             Err(e) => {
@@ -319,7 +377,8 @@ fn parse_occurrences(
     } else {
         None
     };
-    let rrule_prop = maybe_rrule_prop.unwrap();
+    let rrule_prop =
+        maybe_rrule_prop.ok_or_else(|| calendar_error("missing RRULE property after detection"))?;
     let maybe_exdate_prop = find_property(properties, "EXDATE");
     let all_day_event = is_ical_date(dtstart_prop);
     // Prepare a vec of all relevant rrule properties for rrule to work on by stripping tzid parameters
@@ -342,17 +401,24 @@ fn parse_occurrences(
         rule_props.push(rrule_prop.clone());
         let event_as_string = properties_to_string(&rule_props);
         match event_as_string.parse::<RRuleSet>() {
-            Ok(ruleset) => Ok(ruleset
+            Ok(ruleset) => ruleset
                 .all()
                 .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
-                    local_tz
-                        .with_ymd_and_hms(dt.year(), dt.month(), dt.day(), 0, 0, 0)
-                        .unwrap()
+                    local_ymd_hms(
+                        local_tz,
+                        dt.year(),
+                        dt.month(),
+                        dt.day(),
+                        0,
+                        0,
+                        0,
+                        "all-day RRULE occurrence",
+                    )
                 })
-                .collect()),
+                .collect(),
             Err(e) => Err(CalendarError {
                 msg: format!("error in RRULE parsing: {}", e),
             }),
@@ -389,44 +455,40 @@ fn parse_occurrences(
         // Interpret all occurrences as original TZ, then convert to local TZ
         //
         // hard assumption that there is a value always in an rrule
-        let rrule_value = rrule_prop.value.as_ref().unwrap();
+        let rrule_value = property_value(rrule_prop, "RRULE")?;
         // RRULE is a bit special, the parameters are not actually in the params but they are encoded in the VALUE of the property
         // we basically parse the value here and substitute the UNTIL component with a date that has a converted timestamp
-        let rrule_value_modified = rrule_value
-            .split(';')
-            .map(|rrule_component| {
-                if let Some(until_value) = rrule_component.strip_prefix("UNTIL=") {
-                    if until_value.ends_with('Z') {
-                        // NOTE we do not check whether maybe the parse failed, we hard assume it does
-                        let until_originaltz_str = if original_tz.is_left() {
-                            parse_ical_datetime(
-                                until_value.to_string().strip_suffix('Z').unwrap(),
-                                &Left(UTC),
-                                &original_tz.left().unwrap(),
-                            )
-                            .unwrap()
-                            .format("%Y%m%dT%H%M%S")
-                            .to_string()
-                        } else {
-                            parse_ical_datetime(
-                                until_value.to_string().strip_suffix('Z').unwrap(),
-                                &Left(UTC),
-                                original_tz.right().unwrap(),
-                            )
-                            .unwrap()
-                            .format("%Y%m%dT%H%M%S")
-                            .to_string()
-                        };
-                        format!("UNTIL={}", until_originaltz_str)
-                    } else {
-                        rrule_component.to_string()
-                    }
+        let mut modified_rrule_components = Vec::new();
+        for rrule_component in rrule_value.split(';') {
+            let modified_component = if let Some(until_value) =
+                rrule_component.strip_prefix("UNTIL=")
+            {
+                if until_value.ends_with('Z') {
+                    let until_value = until_value.strip_suffix('Z').ok_or_else(|| {
+                        calendar_error("RRULE UNTIL value ended with Z but could not be stripped")
+                    })?;
+                    let until_originaltz_str = match &original_tz {
+                        Either::Left(original_tz) => {
+                            parse_ical_datetime(until_value, &Left(UTC), original_tz)?
+                                .format("%Y%m%dT%H%M%S")
+                                .to_string()
+                        }
+                        Either::Right(original_tz) => {
+                            parse_ical_datetime(until_value, &Left(UTC), *original_tz)?
+                                .format("%Y%m%dT%H%M%S")
+                                .to_string()
+                        }
+                    };
+                    format!("UNTIL={}", until_originaltz_str)
                 } else {
                     rrule_component.to_string()
                 }
-            })
-            .collect::<Vec<String>>()
-            .join(";");
+            } else {
+                rrule_component.to_string()
+            };
+            modified_rrule_components.push(modified_component);
+        }
+        let rrule_value_modified = modified_rrule_components.join(";");
         let new_rule_prop = Property {
             name: rrule_prop.name.clone(),
             params: rrule_prop.params.clone(),
@@ -436,16 +498,21 @@ fn parse_occurrences(
         let event_as_string = properties_to_string(&rule_props);
         // println!("New RRULE string: {:?}", event_as_string);
         match event_as_string.parse::<RRuleSet>() {
-            Ok(ruleset) => Ok(ruleset
+            Ok(ruleset) => ruleset
                 .all()
                 .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| {
-                    let original_datetime = &NaiveDateTime::new(
-                        NaiveDate::from_ymd_opt(dt.year(), dt.month(), dt.day()).unwrap(),
-                        NaiveTime::from_hms_opt(dt.hour(), dt.minute(), dt.second()).unwrap(),
-                    );
+                    let original_date = NaiveDate::from_ymd_opt(dt.year(), dt.month(), dt.day())
+                        .ok_or_else(|| {
+                            calendar_error("invalid date generated while parsing RRULE")
+                        })?;
+                    let original_time =
+                        NaiveTime::from_hms_opt(dt.hour(), dt.minute(), dt.second()).ok_or_else(
+                            || calendar_error("invalid time generated while parsing RRULE"),
+                        )?;
+                    let original_datetime = &NaiveDateTime::new(original_date, original_time);
                     // println!(
                     //     "converted occurence date from {:?} to {:?}",
                     //     original_datetime,
@@ -454,23 +521,20 @@ fn parse_occurrences(
                     //         .unwrap()
                     //         .with_timezone(&local_tz)
                     // );
-                    if original_tz.is_left() {
-                        original_tz
-                            .left()
-                            .unwrap()
-                            .from_local_datetime(original_datetime)
-                            .unwrap()
-                            .with_timezone(local_tz)
-                    } else {
-                        original_tz
-                            .right()
-                            .unwrap()
-                            .from_local_datetime(original_datetime)
-                            .unwrap()
-                            .with_timezone(local_tz)
+                    match &original_tz {
+                        Either::Left(original_tz) => single_local_datetime(
+                            original_tz.from_local_datetime(original_datetime),
+                            "RRULE occurrence",
+                        )
+                        .map(|datetime| datetime.with_timezone(local_tz)),
+                        Either::Right(original_tz) => single_local_datetime(
+                            original_tz.from_local_datetime(original_datetime),
+                            "RRULE occurrence",
+                        )
+                        .map(|datetime| datetime.with_timezone(local_tz)),
                     }
                 })
-                .collect()),
+                .collect(),
             Err(e) => Err(CalendarError {
                 msg: format!("error in RRULE parsing: {}", e),
             }),
@@ -489,10 +553,13 @@ fn partition_modifying_events(
     events: &[(IcalEvent, Event)],
     calendar_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
-) -> (
-    MultiMap<String, (IcalEvent, Event)>,
-    Vec<(IcalEvent, Event)>,
-) {
+) -> Result<
+    (
+        MultiMap<String, (IcalEvent, Event)>,
+        Vec<(IcalEvent, Event)>,
+    ),
+    CalendarError,
+> {
     // Create a map of all modifying events so we can correct recurring occurrences later
     let mut modifying_events: MultiMap<String, (IcalEvent, Event)> = MultiMap::new();
     let mut non_modifying_events: Vec<(IcalEvent, Event)> = Vec::new();
@@ -502,18 +569,20 @@ fn partition_modifying_events(
         // presence of a RECURRENCE-ID property is the trigger to know this is a modifying event
         if let Some(recurrence_id_property) = find_property(&ical_event.properties, "RECURRENCE-ID")
         {
-            match extract_ical_datetime(recurrence_id_property, calendar_timezones, local_tz) {
-                Ok(_) => {
-                    if let Some(uid) = find_property_value(&ical_event.properties, "UID") {
-                        // println!("+MODIFYING EVENT: {:?}", ical_event);
-                        modifying_events.insert(uid, (ical_event.clone(), event.clone()));
-                    }
-                }
-                Err(e) => eprintln!("Can't parse a recurrence id as datetime: {:?}", e),
-            }
+            extract_ical_datetime(recurrence_id_property, calendar_timezones, local_tz)?;
+            let uid = find_property_value(&ical_event.properties, "UID").ok_or_else(|| {
+                calendar_error(format!(
+                    "missing UID for modifying event '{}'",
+                    event.summary
+                ))
+            })?;
+            // println!("+MODIFYING EVENT: {:?}", ical_event);
+            modifying_events.insert(uid, (ical_event.clone(), event.clone()));
         } else {
             // println!("NON-MODIFYING EVENT: {:?}", ical_event);
-            let uid = find_property_value(&ical_event.properties, "UID").unwrap();
+            let uid = find_property_value(&ical_event.properties, "UID").ok_or_else(|| {
+                calendar_error(format!("missing UID for event '{}'", event.summary))
+            })?;
             non_modifying_event_uids.insert(uid);
             non_modifying_events.push((ical_event.clone(), event.clone()));
         }
@@ -530,7 +599,7 @@ fn partition_modifying_events(
     }
     modifying_events
         .retain(|modifying_uid, _value| non_modifying_event_uids.contains(modifying_uid));
-    (modifying_events, non_modifying_events)
+    Ok((modifying_events, non_modifying_events))
 }
 
 fn parse_calendar(text: &str) -> Result<Option<IcalCalendar>, CalendarError> {
@@ -571,30 +640,43 @@ fn calculate_occurrences(
     modifying_events: &MultiMap<String, (IcalEvent, Event)>,
     calendar_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
-) -> Vec<Event> {
+) -> Result<Vec<Event>, CalendarError> {
     occurrences
         .iter()
         .map(|datetime| {
             // We need to figure out whether the occurrence can be used as such or whether it was changed by a modifying event
             // We assume that each ical_event that is a recurring event has a UID, otherwise the unwrap will fail here.
             // Needs more error handling?
-            let occurrence_uid = find_property_value(&ical_event.properties, "UID").unwrap();
-            if modifying_events.contains_key(&occurrence_uid) {
-                let modifications = modifying_events.get_vec(&occurrence_uid).unwrap();
+            let occurrence_uid =
+                find_property_value(&ical_event.properties, "UID").ok_or_else(|| {
+                    calendar_error(format!(
+                        "missing UID while calculating occurrences for '{}'",
+                        parsed_event.summary
+                    ))
+                })?;
+            if let Some(modifications) = modifying_events.get_vec(&occurrence_uid) {
                 for (modifying_ical_event, modifying_event) in modifications {
                     // since these modifying events are constructed before and are assumed to have a recurrence-id we just unwrap here
                     let recurrence_id_property =
-                        find_property(&modifying_ical_event.properties, "RECURRENCE-ID").unwrap();
+                        find_property(&modifying_ical_event.properties, "RECURRENCE-ID")
+                            .ok_or_else(|| {
+                                calendar_error(format!(
+                                    "missing RECURRENCE-ID for modifying event '{}'",
+                                    modifying_event.summary
+                                ))
+                            })?;
                     // println!(
                     //     "Calculating start and end for recurrence event {}",
                     //     parsed_event.summary
                     // );
-                    let recurrence_datetime =
-                        extract_ical_datetime(recurrence_id_property, calendar_timezones, local_tz)
-                            .unwrap();
+                    let recurrence_datetime = extract_ical_datetime(
+                        recurrence_id_property,
+                        calendar_timezones,
+                        local_tz,
+                    )?;
                     if *datetime == recurrence_datetime {
                         // the modifying event has the same UID as our event and it has the same timestamp, so we return the modification instead
-                        return modifying_event.clone();
+                        return Ok(modifying_event.clone());
                     }
                 }
             }
@@ -604,7 +686,7 @@ fn calculate_occurrences(
                     parsed_event.end_timestamp.timestamp()
                         - parsed_event.start_timestamp.timestamp(),
                 );
-            Event {
+            Ok(Event {
                 summary: parsed_event.summary.to_string(),
                 description: parsed_event.description.to_string(),
                 location: parsed_event.location.to_string(),
@@ -612,7 +694,7 @@ fn calculate_occurrences(
                 all_day: parsed_event.all_day,
                 start_timestamp: *datetime,
                 end_timestamp: end_time,
-            }
+            })
         })
         .collect()
 }
@@ -630,7 +712,7 @@ pub fn extract_events(
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
             let (modifying_events, non_modifying_events) =
-                partition_modifying_events(&event_tuples, &calendar_timezones, local_tz);
+                partition_modifying_events(&event_tuples, &calendar_timezones, local_tz)?;
             // Calculate occurrences for recurring events
             non_modifying_events
                 .into_iter()
@@ -641,14 +723,14 @@ pub fn extract_events(
                             if occurrences.is_empty() {
                                 Ok(vec![parsed_event])
                             } else {
-                                Ok(calculate_occurrences(
+                                calculate_occurrences(
                                     &ical_event,
                                     &parsed_event,
                                     &occurrences,
                                     &modifying_events,
                                     &calendar_timezones,
                                     local_tz,
-                                ))
+                                )
                             }
                         }
                         Err(e) => Err(e),
@@ -722,6 +804,77 @@ mod tests {
         let non_zoom_url = "https://google.com";
         let converted_none = convert_to_zoommtg(non_zoom_url);
         assert_eq!(converted_none, None);
+    }
+
+    #[test]
+    fn malformed_event_without_dtstart_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:missing-dtstart\n\
+SUMMARY:Missing DTSTART\n\
+DTEND;TZID=Europe/Berlin:20260427T100000\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("missing DTSTART"));
+    }
+
+    #[test]
+    fn malformed_event_without_uid_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+SUMMARY:Missing UID\n\
+DTSTART;TZID=Europe/Berlin:20260427T090000\n\
+DTEND;TZID=Europe/Berlin:20260427T100000\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("missing UID"));
+    }
+
+    #[test]
+    fn malformed_event_with_unknown_tzid_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:unknown-tzid\n\
+SUMMARY:Unknown TZID\n\
+DTSTART;TZID=Unknown/Timezone:20260427T090000\n\
+DTEND;TZID=Unknown/Timezone:20260427T100000\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("error parsing TZID"));
+        assert!(error.msg.contains("Unknown/Timezone"));
+    }
+
+    #[test]
+    fn malformed_recurrence_id_returns_error() {
+        let calendar = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:recurring-event\n\
+SUMMARY:Recurring event\n\
+DTSTART;TZID=Europe/Berlin:20260427T090000\n\
+DTEND;TZID=Europe/Berlin:20260427T100000\n\
+RRULE:FREQ=DAILY;COUNT=2\n\
+END:VEVENT\n\
+BEGIN:VEVENT\n\
+UID:recurring-event\n\
+RECURRENCE-ID;TZID=Europe/Berlin:not-a-date\n\
+SUMMARY:Broken modified occurrence\n\
+DTSTART;TZID=Europe/Berlin:20260428T093000\n\
+DTEND;TZID=Europe/Berlin:20260428T103000\n\
+END:VEVENT\n\
+END:VCALENDAR";
+
+        let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
+        assert!(error.msg.contains("Can't parse datetime"));
     }
 
     // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
