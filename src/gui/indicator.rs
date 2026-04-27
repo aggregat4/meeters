@@ -44,7 +44,7 @@ fn set_error_icon(indicator: &mut AppIndicator) {
 fn set_some_meetings_left_icon(indicator: &mut AppIndicator) {
     if let Some(icon_path) = find_icon_path() {
         indicator.set_icon(
-            get_icon_path_with_fallbak(
+            get_icon_path_with_fallback(
                 icon_path,
                 "meeters-appindicator-somemeetingsleft.png".to_string(),
             )
@@ -57,7 +57,7 @@ fn set_some_meetings_left_icon(indicator: &mut AppIndicator) {
 fn set_no_meetings_left_icon(indicator: &mut AppIndicator) {
     if let Some(icon_path) = find_icon_path() {
         indicator.set_icon(
-            get_icon_path_with_fallbak(
+            get_icon_path_with_fallback(
                 icon_path,
                 "meeters-appindicator-nomeetingsleft.png".to_string(),
             )
@@ -67,7 +67,7 @@ fn set_no_meetings_left_icon(indicator: &mut AppIndicator) {
     }
 }
 
-fn get_icon_path_with_fallbak(icon_path: PathBuf, icon_filename: String) -> PathBuf {
+fn get_icon_path_with_fallback(icon_path: PathBuf, icon_filename: String) -> PathBuf {
     let nomeetingsleft_icon_path = icon_path.with_file_name(icon_filename);
     if !nomeetingsleft_icon_path.exists() {
         icon_path.with_file_name("meeters-appindicator.png")

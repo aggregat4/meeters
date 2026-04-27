@@ -115,7 +115,6 @@ fn extract_ical_datetime(
         // timestamp with an explicit timezone: YYYYMMDDTHHMMSS
         // We are assuming there is only one value in the TZID param
         let tzid = unescape_string(tzid_value);
-        // println!("We have a TZID: {}", tzid);
         match parse_tzid(&tzid, calendar_timezones) {
             Ok(timezone) => parse_ical_datetime(date_time_str, &timezone, local_tz),
             Err(e) => Err(calendar_error(format!(
@@ -128,13 +127,11 @@ fn extract_ical_datetime(
         //  - a datetime with no timezone: 20201102T235401
         //  - a datetime with in UTC:      20201102T235401Z
         if date_time_str.ends_with('Z') {
-            // println!("We assume UTC because of Z");
             let utc_datetime = date_time_str
                 .strip_suffix('Z')
                 .ok_or_else(|| calendar_error("UTC datetime marker could not be stripped"))?;
             parse_ical_datetime(utc_datetime, &Left(UTC), local_tz)
         } else {
-            // println!("We use the local timezone as the originating timezone");
             parse_ical_datetime(date_time_str, &Left(*local_tz), local_tz)
         }
     }
@@ -145,7 +142,6 @@ fn extract_ical_datetime(
 ///
 /// See <https://tools.ietf.org/html/rfc5545#section-3.3.4>
 fn parse_ical_date_notz(date: &str, tz: &Tz) -> Result<DateTime<Tz>, CalendarError> {
-    // println!("Parsing {}", date);
     match NaiveDate::parse_from_str(date, "%Y%m%d") {
         // NOTE: we don't convert the datetime to the given timezone since we are talking about a
         // date that represents a particular _day_, not a time. Therefore we need to make sure that
@@ -193,7 +189,6 @@ fn extract_start_end_time(
     //    in this case it is a YYYYMMDDTHHMMSS string with optionally Z at the end for zulu time
     //    in the date-time case there is an (optional?) TZID param that specific the timezone as a string
     if let Some(value_param) = first_param_value(start_property, "VALUE") {
-        // println!("Have a basic date without timezone datetime");
         // the first real value of the VALUE param should be "DATE"
         if value_param != "DATE" {
             return Err(CalendarError {
@@ -211,7 +206,6 @@ fn extract_start_end_time(
             None => Ok((start_time, start_time, true)),
         }
     } else {
-        // println!("Have a 'real' datetime");
         // not a whole day event, so real times, there should be an end time
         match end_property {
             Some(p) => {
@@ -274,7 +268,6 @@ fn parse_event(
     let location = unescape_string(
         &find_property_value(&ical_event.properties, "LOCATION").unwrap_or_default(),
     );
-    // println!("Parsing event '{}'", summary);
     let (start_timestamp, end_timestamp, all_day) =
         extract_start_end_time(ical_event, calendar_timezones, local_tz)?; // ? short circuits the error
     let mut meeturl = parse_zoom_url(&location)
@@ -496,7 +489,6 @@ fn parse_occurrences(
         };
         rule_props.push(new_rule_prop);
         let event_as_string = properties_to_string(&rule_props);
-        // println!("New RRULE string: {:?}", event_as_string);
         match event_as_string.parse::<RRuleSet>() {
             Ok(ruleset) => ruleset
                 .all()
@@ -513,14 +505,6 @@ fn parse_occurrences(
                             || calendar_error("invalid time generated while parsing RRULE"),
                         )?;
                     let original_datetime = &NaiveDateTime::new(original_date, original_time);
-                    // println!(
-                    //     "converted occurence date from {:?} to {:?}",
-                    //     original_datetime,
-                    //     original_tz
-                    //         .from_local_datetime(&original_datetime)
-                    //         .unwrap()
-                    //         .with_timezone(&local_tz)
-                    // );
                     match &original_tz {
                         Either::Left(original_tz) => single_local_datetime(
                             original_tz.from_local_datetime(original_datetime),
@@ -576,10 +560,8 @@ fn partition_modifying_events(
                     event.summary
                 ))
             })?;
-            // println!("+MODIFYING EVENT: {:?}", ical_event);
             modifying_events.insert(uid, (ical_event.clone(), event.clone()));
         } else {
-            // println!("NON-MODIFYING EVENT: {:?}", ical_event);
             let uid = find_property_value(&ical_event.properties, "UID").ok_or_else(|| {
                 calendar_error(format!("missing UID for event '{}'", event.summary))
             })?;
@@ -665,10 +647,6 @@ fn calculate_occurrences(
                                     modifying_event.summary
                                 ))
                             })?;
-                    // println!(
-                    //     "Calculating start and end for recurrence event {}",
-                    //     parsed_event.summary
-                    // );
                     let recurrence_datetime = extract_ical_datetime(
                         recurrence_id_property,
                         calendar_timezones,
@@ -707,7 +685,6 @@ pub fn extract_events(
     match parse_calendar(text)? {
         Some(calendar) => {
             let calendar_timezones = parse_ical_timezones(&calendar, local_tz)?;
-            //println!("Calendar timezones found: {:?}", calendar_timezones);
             let event_tuples = parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
@@ -719,7 +696,6 @@ pub fn extract_events(
                 .map(|(ical_event, parsed_event)| {
                     match parse_occurrences(&ical_event.properties, &calendar_timezones, local_tz) {
                         Ok(occurrences) => {
-                            // println!("Occurrences for {:?}: {:?}", ical_event, occurrences);
                             if occurrences.is_empty() {
                                 Ok(vec![parsed_event])
                             } else {
@@ -778,7 +754,6 @@ mod tests {
 
     #[test]
     fn rrule_all_missing_final_meeting() {
-        //println!("{:?}", "DTSTART;TZID=W. Europe Standard Time:20210316T113000\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20210406T113000,20210504T11300\n0UID:040000008200E00074C5B7101A82E0080000000000EB5C2C7B0FD701000000000000000\n 010000000E4ADD290686A07499DF2A0FAB11D79E9".parse::<RRuleSet>().unwrap().all());
         "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO"
             .parse::<RRuleSet>()
             .unwrap();
@@ -881,19 +856,6 @@ END:VCALENDAR";
         let error = extract_events(calendar, &chrono_tz::Europe::Berlin, false).unwrap_err();
         assert!(error.msg.contains("Can't parse datetime"));
     }
-
-    // The following test was reported as https://github.com/fmeringdal/rust_rrule/issues/13
-    // but it wasn't really rrule's fault, it just can't deal with non-standard timezone identifiers
-    // I am now trying to handle that myself and "protecting" rrule from this case
-    // #[test]
-    // fn rrule_generates_final_event_on_8_3_2021() {
-    //     let dates = "DTSTART;TZID=W. Europe Standard Time:20201214T093000\nRRULE:FREQ=WEEKLY;UNTIL=20210308T083000Z;INTERVAL=2;BYDAY=MO;WKST=MO\nEXDATE;TZID=W. Europe Standard Time:20201228T093000,20210125T093000,20210208T093000".parse::<RRuleSet>().unwrap().all();
-    //     // the following outputs 2021-02-22 09:30:00 UTC
-    //     println!("last date: {}", dates[dates.len() - 1]);
-    //     assert_eq!(8, dates[dates.len() - 1].day());
-    //     assert_eq!(3, dates[dates.len() - 1].month());
-    //     assert_eq!(2021, dates[dates.len() - 1].year());
-    // }
 
     // TODO: create a test case for this apple event in outlook custom timezone example:
     /*

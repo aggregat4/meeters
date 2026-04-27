@@ -4,8 +4,6 @@ use ical::property::Property;
 pub fn find_property_value(properties: &[Property], name: &str) -> Option<String> {
     for property in properties {
         if property.name == name {
-            // obviously this clone works but I don't like it, as_ref() didn't seem to do it
-            // still do not understand the semantics I should be using here
             return property.value.clone();
         }
     }
@@ -66,7 +64,7 @@ pub fn prop_to_string(prop: &Property) -> String {
 
 pub fn properties_to_string(properties: &[Property]) -> String {
     properties
-        .iter() // "interesting" note here: i was getting an E0507 when using into_iter since that apparenty takes ownership. and iter is just return refs
+        .iter()
         .map(prop_to_string)
         .collect::<Vec<String>>()
         .join("\n")

@@ -23,19 +23,6 @@ impl TimeSpans for CustomTz {
     fn timespans(&self) -> FixedTimespanSet {
         self.timespanset.clone()
     }
-    // const REST: &'static [(i64, FixedTimespan)] = &[
-    //     (-2717650800, FixedTimespan { utc_offset: -18000, dst_offset: 0, name: "EST" }),
-    //     (-1633280400, FixedTimespan { utc_offset: -18000, dst_offset: 3600, name: "EDT" }),
-    //     (-1615140000, FixedTimespan { utc_offset: -18000, dst_offset: 0, name: "EST" }),
-    // ];
-    // FixedTimespanSet {
-    //     first: FixedTimespan {
-    //         utc_offset: -17762,
-    //         dst_offset: 0,
-    //         name: "LMT",
-    //     },
-    //     rest: REST
-    // }
 }
 
 /// An Offset that applies for a period of time

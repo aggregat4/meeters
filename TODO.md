@@ -47,21 +47,14 @@
 - [x] Keep public APIs small: `initialize_gui`, `run_gui_main_loop`, and a small window/tray coordination surface.
 - [x] Do this after extracting duplicated day view code, so the split is mostly moving already-clean functions.
 
-## 8. Introduce a richer error type
+## 8. Clean up naming and review comments
 
-- [ ] Replace `CalendarError { msg: String }` with a typed error enum, probably using `thiserror`.
-- [ ] Preserve user-readable messages for the tray refresh log.
-- [ ] Include categories for config, fetch, iCal parse, timezone parse, recurrence parse, and GUI integration errors.
-- [ ] Retain source errors where useful so debugging does not lose context.
+- [x] Rename `get_icon_path_with_fallbak` to `get_icon_path_with_fallback`.
+- [x] Keep `read_fucked_windows_zones` and related identifiers unchanged; the naming intentionally documents the cost of dealing with Outlook/Windows timezone data.
+- [x] Produce a concrete list of comments proposed for removal or rewrite before editing them.
+- [x] Only remove comments after review; preserve comments that explain non-obvious calendar/timezone behavior, GTK constraints, or compatibility workarounds.
 
-## 9. Clean up naming and comments
-
-- [ ] Rename `get_icon_path_with_fallbak` to `get_icon_path_with_fallback`.
-- [ ] Rename `read_fucked_windows_zones` and related identifiers to neutral names such as `read_nonstandard_windows_zones`.
-- [ ] Remove or rewrite stale comments that describe historical experiments rather than current behavior.
-- [ ] Keep comments only where they explain non-obvious calendar/timezone behavior or GTK constraints.
-
-## 10. Expand behavior-focused tests
+## 9. Expand behavior-focused tests
 
 - [ ] Add parser tests around malformed but realistic iCal input.
 - [ ] Add interval filtering tests for all-day events, events crossing midnight, events starting exactly at interval boundaries, and events ending exactly at interval boundaries.
@@ -69,7 +62,7 @@
 - [ ] Add tests for notification de-duplication logic if it gets extracted from the background loop.
 - [ ] Add tests for adjacent event layout math if timeline positioning is extracted into pure helper functions.
 
-## 11. Revisit tray integration deprecation
+## 10. Revisit tray integration deprecation
 
 - [ ] Track whether Rust bindings for `libayatana-appindicator-glib` become practical.
 - [ ] Evaluate whether a StatusNotifierItem implementation would avoid the deprecated `libayatana-appindicator` stack.

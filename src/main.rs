@@ -251,8 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            // Phase two of the background loop: check whether we have events that are close to occurring and trigger a notification
-            // find the first event that is about to start in the next minute and if we did not notify before, send a notification
+            // Notify once for the next event that starts within the configured warning window.
             let now = Local::now();
             let potential_next_immediate_upcoming_event = last_events.iter().find(|event| {
                 let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
