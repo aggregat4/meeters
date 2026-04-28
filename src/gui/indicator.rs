@@ -1,5 +1,5 @@
 use crate::config::get_config_directory;
-use crate::domain::{Event, RefreshState};
+use crate::domain::{Event, RefreshState, ONLINE_MEETING_MARKER};
 use crate::gui::actions::open_meeting;
 use crate::gui::refresh_log::{refresh_status_menu_label, show_refresh_log_dialog};
 use crate::gui::window::WindowManager;
@@ -129,7 +129,7 @@ pub fn create_indicator_menu(
                 .to_owned()
             };
             let meeturl_string = match &event.meeturl {
-                Some(_) => " (Zoom)",
+                Some(_) => ONLINE_MEETING_MARKER,
                 None => "",
             };
 

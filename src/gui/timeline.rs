@@ -1,4 +1,4 @@
-use crate::domain::Event;
+use crate::domain::{Event, ONLINE_MEETING_MARKER};
 use crate::gui::actions::open_meeting;
 use crate::gui::styles::{
     event_palette, load_css, style_label, style_label_with_css, CURRENT_TIME_MARKER, TEXT_SUBTLE,
@@ -74,7 +74,7 @@ impl TimelineView {
                 time_str,
                 event.summary,
                 if event.meeturl.is_some() {
-                    " (Zoom)"
+                    ONLINE_MEETING_MARKER
                 } else {
                     ""
                 }
@@ -84,7 +84,7 @@ impl TimelineView {
                 "{}{}",
                 event.summary,
                 if event.meeturl.is_some() {
-                    " (Zoom)"
+                    ONLINE_MEETING_MARKER
                 } else {
                     ""
                 }

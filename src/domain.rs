@@ -3,6 +3,8 @@ use chrono_tz::Tz;
 use std::collections::VecDeque;
 use std::fmt;
 
+pub const ONLINE_MEETING_MARKER: &str = " ◉";
+
 #[derive(Debug, Clone)]
 pub struct CalendarError {
     // Own the message so callers can construct contextual errors dynamically.
