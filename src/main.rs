@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::thread;
 
 use chrono::prelude::*;
@@ -71,6 +72,23 @@ enum CalendarMessages {
     RefreshStateChanged,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EventNotificationKey {
+    summary: String,
+    meeturl: Option<String>,
+    start_timestamp: DateTime<Tz>,
+    end_timestamp: DateTime<Tz>,
+}
+
+fn event_notification_key(event: &Event) -> EventNotificationKey {
+    EventNotificationKey {
+        summary: event.summary.clone(),
+        meeturl: event.meeturl.clone(),
+        start_timestamp: event.start_timestamp,
+        end_timestamp: event.end_timestamp,
+    }
+}
+
 fn send_calendar_message(
     sender: &async_channel::Sender<CalendarMessages>,
     message: CalendarMessages,
@@ -83,18 +101,21 @@ fn send_calendar_message(
     }
 }
 
-fn next_event_to_notify<'a>(
+fn events_to_notify<'a>(
     events: &'a [Event],
     now: DateTime<Local>,
     warning_time_seconds: i64,
-    last_notification_start_time: Option<DateTime<Tz>>,
-) -> Option<&'a Event> {
-    events.iter().find(|event| {
-        let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
-        time_distance_from_now.num_seconds() > 0
-            && time_distance_from_now.num_seconds() <= warning_time_seconds
-            && last_notification_start_time != Some(event.start_timestamp)
-    })
+    notified_event_keys: &HashSet<EventNotificationKey>,
+) -> Vec<&'a Event> {
+    events
+        .iter()
+        .filter(|event| {
+            let time_distance_from_now = event.start_timestamp.signed_duration_since(now);
+            time_distance_from_now.num_seconds() > 0
+                && time_distance_from_now.num_seconds() <= warning_time_seconds
+                && !notified_event_keys.contains(&event_notification_key(event))
+        })
+        .collect()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -191,7 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     thread::spawn(move || {
         let mut last_download_time = 0;
         let mut last_events: Vec<Event> = vec![];
-        let mut last_notification_start_time: Option<DateTime<Tz>> = None;
+        let mut notified_event_keys: HashSet<EventNotificationKey> = HashSet::new();
         loop {
             let current_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -249,6 +270,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         // Store today's events for notifications
                         last_events = day_events[0].clone();
+                        let todays_event_keys = last_events
+                            .iter()
+                            .map(event_notification_key)
+                            .collect::<HashSet<_>>();
+                        notified_event_keys.retain(|key| todays_event_keys.contains(key));
 
                         if !send_calendar_message(&events_sender, DayEvents(day_events)) {
                             break;
@@ -266,21 +292,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            // Notify once for the next event that starts within the configured warning window.
+            // Notify once for each event that starts within the configured warning window.
             let now = Local::now();
-            if let Some(next_immediate_upcoming_event) = next_event_to_notify(
+            let immediate_upcoming_events = events_to_notify(
                 &last_events,
                 now,
                 event_warning_time_seconds,
-                last_notification_start_time,
-            ) {
+                &notified_event_keys,
+            );
+            for immediate_upcoming_event in immediate_upcoming_events {
                 if !send_calendar_message(
                     &events_sender,
-                    EventNotification(next_immediate_upcoming_event.clone()),
+                    EventNotification(immediate_upcoming_event.clone()),
                 ) {
-                    break;
+                    return;
                 }
-                last_notification_start_time = Some(next_immediate_upcoming_event.start_timestamp);
+                notified_event_keys.insert(event_notification_key(immediate_upcoming_event));
             }
             thread::sleep(std::time::Duration::from_secs(5));
         }
@@ -433,24 +460,51 @@ mod tests {
         );
 
         let events = vec![candidate, too_late];
-        let selected = next_event_to_notify(&events, now, 60, None).unwrap();
+        let notified_event_keys = HashSet::new();
+        let selected = events_to_notify(&events, now, 60, &notified_event_keys);
 
-        assert_eq!(selected.summary, "candidate");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].summary, "candidate");
     }
 
     #[test]
-    fn notification_candidate_skips_already_notified_event() {
+    fn notification_candidates_include_same_start_time_events() {
+        let now = berlin_datetime(2026, 4, 27, 9, 0).with_timezone(&Local);
+        let first = event(
+            "first",
+            berlin_datetime(2026, 4, 27, 9, 0) + chrono::Duration::seconds(30),
+            berlin_datetime(2026, 4, 27, 9, 30),
+        );
+        let second = event(
+            "second",
+            berlin_datetime(2026, 4, 27, 9, 0) + chrono::Duration::seconds(30),
+            berlin_datetime(2026, 4, 27, 10, 0),
+        );
+        let events = vec![first, second];
+        let notified_event_keys = HashSet::new();
+
+        let selected = events_to_notify(&events, now, 60, &notified_event_keys);
+        let summaries = selected
+            .into_iter()
+            .map(|event| event.summary.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(summaries, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn notification_candidates_skip_already_notified_event() {
         let now = berlin_datetime(2026, 4, 27, 9, 0).with_timezone(&Local);
         let already_notified = event(
             "already notified",
             berlin_datetime(2026, 4, 27, 9, 0) + chrono::Duration::seconds(30),
             berlin_datetime(2026, 4, 27, 9, 30),
         );
-        let last_notification_start_time = Some(already_notified.start_timestamp);
+        let notified_event_keys = HashSet::from([event_notification_key(&already_notified)]);
         let events = vec![already_notified];
 
-        let selected = next_event_to_notify(&events, now, 60, last_notification_start_time);
+        let selected = events_to_notify(&events, now, 60, &notified_event_keys);
 
-        assert!(selected.is_none());
+        assert!(selected.is_empty());
     }
 }

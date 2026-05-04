@@ -7,9 +7,10 @@ use chrono::prelude::*;
 use gtk::prelude::*;
 use gtk::Menu;
 use libappindicator::{AppIndicator, AppIndicatorStatus};
-use notify_rust::Notification;
+use notify_rust::{Notification, Timeout};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 fn has_icons(dir: &Path) -> bool {
     let normal_icon_path = dir.with_file_name("meeters-appindicator.png");
@@ -210,6 +211,14 @@ fn set_icon_for_refresh_state(
 }
 
 pub fn show_event_notification(event: Event) {
+    if event.meeturl.is_some() {
+        thread::spawn(move || show_event_notification_now(event));
+    } else {
+        show_event_notification_now(event);
+    }
+}
+
+fn show_event_notification_now(event: Event) {
     let summary_str = &format!(
         "{} - {}",
         event.start_timestamp.format("%H:%M"),
@@ -226,22 +235,26 @@ pub fn show_event_notification(event: Event) {
                 .unwrap(),
         )
         .icon("appointment-new")
-        .urgency(notify_rust::Urgency::Critical);
+        .urgency(notify_rust::Urgency::Critical)
+        .timeout(Timeout::Never);
 
     if let Some(meeturl) = event.meeturl {
-        notification
+        let handle = notification
             .action(
                 &format!("{}{}", MEETERS_NOTIFICATION_ACTION_OPEN_MEETING, meeturl),
                 "Open Zoom Meeting",
             )
-            .show()
-            .unwrap()
-            .wait_for_action(|action| {
+            .show();
+        match handle {
+            Ok(handle) => handle.wait_for_action(|action| {
                 if let Some(meeting) = action.strip_prefix(MEETERS_NOTIFICATION_ACTION_OPEN_MEETING)
                 {
-                    open_meeting(meeting);
+                    let meeting = meeting.to_string();
+                    glib::idle_add_once(move || open_meeting(&meeting));
                 }
-            });
+            }),
+            Err(e) => log::warn!("could not show notification: {}", e),
+        }
     } else if let Err(e) = notification.show() {
         log::warn!("could not show notification: {}", e);
     }
