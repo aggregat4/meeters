@@ -71,6 +71,14 @@ fn compact_room_label(event: &Event) -> Option<String> {
 fn participant_list(participants: &[crate::domain::Participant]) -> String {
     participants
         .iter()
+        .map(|participant| participant.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn room_list(participants: &[crate::domain::Participant]) -> String {
+    participants
+        .iter()
         .map(|participant| participant.display_text())
         .collect::<Vec<_>>()
         .join(", ")
@@ -88,11 +96,7 @@ fn event_tooltip_text(event: &Event) -> Option<String> {
         } else {
             "Rooms"
         };
-        lines.push(format!(
-            "{}: {}",
-            label,
-            participant_list(&event.metadata.rooms)
-        ));
+        lines.push(format!("{}: {}", label, room_list(&event.metadata.rooms)));
     }
     if !event.metadata.required_attendees.is_empty() {
         lines.push(format!(

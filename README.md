@@ -32,6 +32,21 @@ MEETERS_EWS_USER=user@example.com
 When using EWS, meeters asks for the Exchange password in the UI on first refresh and stores it
 in the desktop keyring/wallet. EWS requests use Basic auth over HTTPS.
 
+The EWS password is stored through the FreeDesktop Secret Service API, which is typically backed
+by GNOME Keyring, KDE Wallet, or a compatible provider such as KeePassXC. The keyring service name
+is:
+
+```
+net.aggregat4.meeters.exchange
+```
+
+The entry user is the configured `MEETERS_EWS_USER`. On KDE, inspect or delete the entry with
+KWalletManager. If `secret-tool` is installed, the stored password can also be checked with:
+
+```bash
+secret-tool lookup service net.aggregat4.meeters.exchange username user@example.com
+```
+
 The following properties are supported:
 
 | Property | Required | Default Value | Description |
