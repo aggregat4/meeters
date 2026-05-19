@@ -21,11 +21,40 @@ The file should have name/value pairs separated by equals signs. For example:
 MEETERS_ICAL_URL=http://example.com/calendar.ics
 ```
 
+For an on-prem Exchange calendar via EWS:
+
+```
+MEETERS_CALENDAR_SOURCE=ews
+MEETERS_EWS_URL=https://mail.example.com/EWS/Exchange.asmx
+MEETERS_EWS_USER=user@example.com
+```
+
+When using EWS, meeters asks for the Exchange password in the UI on first refresh and stores it
+in the desktop keyring/wallet. EWS requests use Basic auth over HTTPS.
+
+The EWS password is stored through the FreeDesktop Secret Service API, which is typically backed
+by GNOME Keyring, KDE Wallet, or a compatible provider such as KeePassXC. The keyring service name
+is:
+
+```
+net.aggregat4.meeters.exchange
+```
+
+The entry user is the configured `MEETERS_EWS_USER`. On KDE, inspect or delete the entry with
+KWalletManager. If `secret-tool` is installed, the stored password can also be checked with:
+
+```bash
+secret-tool lookup service net.aggregat4.meeters.exchange username user@example.com
+```
+
 The following properties are supported:
 
 | Property | Required | Default Value | Description |
 |----------|----------|---------------|-------------|
-| MEETERS_ICAL_URL | yes | - | The HTTP URL to your ical calendar |
+| MEETERS_CALENDAR_SOURCE | no | ics | Calendar source to use. Supported values: `ics` and `ews`. |
+| MEETERS_ICAL_URL | yes for `ics` | - | The HTTP URL to your ical calendar |
+| MEETERS_EWS_URL | yes for `ews` | - | The direct Exchange Web Services endpoint, typically ending in `/EWS/Exchange.asmx`. |
+| MEETERS_EWS_USER | yes for `ews` | - | The Exchange user in email form, for example `user@example.com`. |
 | MEETERS_LOCAL_TIMEZONE | no | Europe/Berlin | The local timezone where all times will be converted to. Make sure you set this to a valid IANA timezone identifier if you are not in the default timezone |
 | MEETERS_EVENT_NOTIFICATION | no | true | Whether or not an upcoming event should be announced with a sticky notification ("true" or "false") | 
 | MEETERS_POLLING_INTERVAL_MS | no | 120000 | The time in milliseconds between two fetches of the ical calendar. |

@@ -4,6 +4,53 @@ use std::collections::VecDeque;
 use std::fmt;
 
 pub const ONLINE_MEETING_MARKER: &str = " ◉";
+pub const DECLINED_ROOM_MARKER: &str = " !";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseStatus {
+    Accepted,
+    Tentative,
+    Declined,
+    NoResponse,
+    Unknown,
+}
+
+impl ResponseStatus {
+    pub fn from_ews(value: &str) -> Self {
+        match value {
+            "Accept" => ResponseStatus::Accepted,
+            "Tentative" => ResponseStatus::Tentative,
+            "Decline" => ResponseStatus::Declined,
+            "NoResponseReceived" => ResponseStatus::NoResponse,
+            _ => ResponseStatus::Unknown,
+        }
+    }
+
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            ResponseStatus::Accepted => "accepted",
+            ResponseStatus::Tentative => "tentative",
+            ResponseStatus::Declined => "DECLINED",
+            ResponseStatus::NoResponse => "no response",
+            ResponseStatus::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Participant {
+    pub name: String,
+    pub response: Option<ResponseStatus>,
+}
+
+impl Participant {
+    pub fn display_text(&self) -> String {
+        match &self.response {
+            Some(response) => format!("{}: {}", self.name, response.display_label()),
+            None => self.name.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CalendarError {
@@ -18,11 +65,37 @@ impl fmt::Display for CalendarError {
 }
 
 #[derive(Debug, Clone)]
+pub struct EventMetadata {
+    pub organizer: Option<String>,
+    pub rooms: Vec<Participant>,
+    pub required_attendees: Vec<Participant>,
+    pub optional_attendees: Vec<Participant>,
+}
+
+impl EventMetadata {
+    pub fn empty() -> Self {
+        EventMetadata {
+            organizer: None,
+            rooms: Vec::new(),
+            required_attendees: Vec::new(),
+            optional_attendees: Vec::new(),
+        }
+    }
+
+    pub fn has_declined_room(&self) -> bool {
+        self.rooms
+            .iter()
+            .any(|room| room.response == Some(ResponseStatus::Declined))
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Event {
     pub summary: String,
     pub description: String,
     pub location: String,
     pub meeturl: Option<String>,
+    pub metadata: EventMetadata,
     pub all_day: bool,
     pub start_timestamp: DateTime<Tz>,
     pub end_timestamp: DateTime<Tz>,
@@ -37,6 +110,7 @@ pub struct RefreshLogEntry {
 
 #[derive(Debug, Clone)]
 pub struct RefreshState {
+    pub source_label: String,
     pub last_attempt_at: Option<DateTime<Local>>,
     pub last_success_at: Option<DateTime<Local>>,
     pub last_error: Option<String>,
@@ -46,8 +120,9 @@ pub struct RefreshState {
 }
 
 impl RefreshState {
-    pub fn new(max_entries: usize) -> Self {
+    pub fn new(max_entries: usize, source_label: impl Into<String>) -> Self {
         RefreshState {
+            source_label: source_label.into(),
             last_attempt_at: None,
             last_success_at: None,
             last_error: None,

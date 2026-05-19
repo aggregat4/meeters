@@ -1,4 +1,4 @@
-use crate::domain::{Event, ONLINE_MEETING_MARKER};
+use crate::domain::{Event, DECLINED_ROOM_MARKER, ONLINE_MEETING_MARKER};
 use crate::gui::actions::open_meeting;
 use crate::gui::styles::{
     event_palette, load_css, style_label, style_label_with_css, CURRENT_TIME_MARKER, TEXT_SUBTLE,
@@ -10,6 +10,7 @@ use gtk::prelude::*;
 pub const HOUR_HEIGHT: i32 = 80;
 pub const TIMELINE_MIN_WIDTH: i32 = 600;
 pub const DAY_MIN_WIDTH: i32 = 700;
+const MINIMUM_RENDERED_OVERLAP_FOR_COLUMNS: i32 = 2;
 
 fn event_button_width(group_size: i32, spacing: i32) -> i32 {
     ((TIMELINE_MIN_WIDTH - (spacing * (group_size + 1))) / group_size).max(200)
@@ -18,15 +19,111 @@ fn event_button_width(group_size: i32, spacing: i32) -> i32 {
 fn event_vertical_geometry(
     start_minutes: i32,
     duration_minutes: i32,
-    touches_previous_event: bool,
+    shares_boundary: bool,
 ) -> (i32, i32) {
-    let y_position =
-        (start_minutes * HOUR_HEIGHT) / 60 - if touches_previous_event { 1 } else { 0 };
-    let height = ((duration_minutes * HOUR_HEIGHT) / 60
-        + if touches_previous_event { 1 } else { 0 })
-    .max(30);
+    let y_position = (start_minutes * HOUR_HEIGHT) / 60 - if shares_boundary { 1 } else { 0 };
+    let height =
+        ((duration_minutes * HOUR_HEIGHT) / 60 + if shares_boundary { 1 } else { 0 }).max(30);
 
     (y_position, height)
+}
+
+fn event_start_and_duration_minutes(event: &Event, start_hour: i32) -> (i32, i32) {
+    let event_start = event.start_timestamp.with_timezone(&Local);
+    let event_end = event.end_timestamp.with_timezone(&Local);
+    let start_minutes = (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
+    let duration_minutes = event_end.signed_duration_since(event_start).num_minutes() as i32;
+
+    (start_minutes, duration_minutes)
+}
+
+fn shares_timeline_boundary(event: &Event, events: &[Event]) -> bool {
+    events
+        .iter()
+        .any(|other| other.end_timestamp == event.start_timestamp)
+}
+
+fn rendered_event_geometry(event: &Event, events: &[Event], start_hour: i32) -> (i32, i32) {
+    let (start_minutes, duration_minutes) = event_start_and_duration_minutes(event, start_hour);
+    event_vertical_geometry(
+        start_minutes,
+        duration_minutes,
+        shares_timeline_boundary(event, events),
+    )
+}
+
+fn rendered_events_overlap(a: &Event, b: &Event, events: &[Event], start_hour: i32) -> bool {
+    let (a_y, a_height) = rendered_event_geometry(a, events, start_hour);
+    let (b_y, b_height) = rendered_event_geometry(b, events, start_hour);
+
+    let overlap = (a_y + a_height).min(b_y + b_height) - a_y.max(b_y);
+    overlap >= MINIMUM_RENDERED_OVERLAP_FOR_COLUMNS
+}
+
+fn compact_room_label(event: &Event) -> Option<String> {
+    match event.metadata.rooms.as_slice() {
+        [] => None,
+        [room] => Some(room.display_text()),
+        [first, rest @ ..] => Some(format!("{} +{}", first.display_text(), rest.len())),
+    }
+}
+
+fn participant_list(participants: &[crate::domain::Participant]) -> String {
+    participants
+        .iter()
+        .map(|participant| participant.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn room_list(participants: &[crate::domain::Participant]) -> String {
+    participants
+        .iter()
+        .map(|participant| participant.display_text())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn event_tooltip_text(event: &Event) -> Option<String> {
+    let mut lines = Vec::new();
+
+    if let Some(organizer) = &event.metadata.organizer {
+        lines.push(format!("Organizer: {}", organizer));
+    }
+    if !event.metadata.rooms.is_empty() {
+        let label = if event.metadata.rooms.len() == 1 {
+            "Room"
+        } else {
+            "Rooms"
+        };
+        lines.push(format!("{}: {}", label, room_list(&event.metadata.rooms)));
+    }
+    if !event.metadata.required_attendees.is_empty() {
+        lines.push(format!(
+            "Required: {}",
+            participant_list(&event.metadata.required_attendees)
+        ));
+    }
+    if !event.metadata.optional_attendees.is_empty() {
+        lines.push(format!(
+            "Optional: {}",
+            participant_list(&event.metadata.optional_attendees)
+        ));
+    }
+
+    let trimmed_description = event.description.trim();
+    if !trimmed_description.is_empty() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(trimmed_description.to_string());
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
 }
 
 pub struct TimelineView {
@@ -38,9 +135,8 @@ impl TimelineView {
         let button = gtk::Button::new();
         button.set_size_request(width, height.max(30));
 
-        let trimmed_description = event.description.trim();
-        if !trimmed_description.is_empty() {
-            button.set_tooltip_text(Some(trimmed_description));
+        if let Some(tooltip_text) = event_tooltip_text(event) {
+            button.set_tooltip_text(Some(&tooltip_text));
         }
 
         let palette = event_palette(event);
@@ -61,6 +157,23 @@ impl TimelineView {
             ),
         );
 
+        let markers = format!(
+            "{}{}",
+            if event.meeturl.is_some() {
+                ONLINE_MEETING_MARKER
+            } else {
+                ""
+            },
+            if event.metadata.has_declined_room() {
+                DECLINED_ROOM_MARKER
+            } else {
+                ""
+            }
+        );
+        let room_suffix = compact_room_label(event)
+            .map(|room| format!("\n{}", room))
+            .unwrap_or_default();
+
         let text = if show_time {
             let event_start = event.start_timestamp.with_timezone(&Local);
             let event_end = event.end_timestamp.with_timezone(&Local);
@@ -69,26 +182,9 @@ impl TimelineView {
                 event_start.format("%H:%M"),
                 event_end.format("%H:%M")
             );
-            format!(
-                "{}  {}{}",
-                time_str,
-                event.summary,
-                if event.meeturl.is_some() {
-                    ONLINE_MEETING_MARKER
-                } else {
-                    ""
-                }
-            )
+            format!("{}  {}{}{}", time_str, event.summary, markers, room_suffix)
         } else {
-            format!(
-                "{}{}",
-                event.summary,
-                if event.meeturl.is_some() {
-                    ONLINE_MEETING_MARKER
-                } else {
-                    ""
-                }
-            )
+            format!("{}{}{}", event.summary, markers, room_suffix)
         };
 
         let label = gtk::Label::new(Some(&text));
@@ -221,8 +317,7 @@ impl TimelineView {
             let mut found_group = false;
             for group in &mut event_groups {
                 let overlaps = group.iter().any(|existing| {
-                    !(event.end_timestamp <= existing.start_timestamp
-                        || event.start_timestamp >= existing.end_timestamp)
+                    rendered_events_overlap(event, existing, &regular_events, start_hour)
                 });
 
                 if overlaps {
@@ -242,22 +337,8 @@ impl TimelineView {
             let button_width = event_button_width(group_size, spacing);
 
             for (index, event) in group.iter().enumerate() {
-                let event_start = event.start_timestamp.with_timezone(&Local);
-                let event_end = event.end_timestamp.with_timezone(&Local);
-
-                let start_minutes =
-                    (event_start.hour() as i32 - start_hour) * 60 + event_start.minute() as i32;
-                let duration_minutes =
-                    event_end.signed_duration_since(event_start).num_minutes() as i32;
-
-                let touches_previous_event = regular_events
-                    .iter()
-                    .any(|other| other.end_timestamp == event.start_timestamp);
-                let (y_position, height) = event_vertical_geometry(
-                    start_minutes,
-                    duration_minutes,
-                    touches_previous_event,
-                );
+                let (y_position, height) =
+                    rendered_event_geometry(event, &regular_events, start_hour);
                 let x_position = spacing + (button_width + spacing) * index as i32;
 
                 let button = Self::create_event_button(event, button_width, height, true);
@@ -313,6 +394,8 @@ impl TimelineView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::EventMetadata;
+    use chrono_tz::Tz;
 
     #[test]
     fn adjacent_event_geometry_expands_into_shared_boundary() {
@@ -345,5 +428,42 @@ mod tests {
     #[test]
     fn overlapping_event_width_keeps_minimum_readable_width() {
         assert_eq!(event_button_width(4, 10), 200);
+    }
+
+    fn berlin_datetime(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> DateTime<Tz> {
+        chrono_tz::Europe::Berlin
+            .with_ymd_and_hms(year, month, day, hour, minute, 0)
+            .unwrap()
+    }
+
+    fn event(summary: &str, start_hour: u32, start_minute: u32, end_minute: u32) -> Event {
+        Event {
+            summary: summary.to_string(),
+            description: String::new(),
+            location: String::new(),
+            meeturl: None,
+            metadata: EventMetadata::empty(),
+            all_day: false,
+            start_timestamp: berlin_datetime(2026, 5, 19, start_hour, start_minute),
+            end_timestamp: berlin_datetime(2026, 5, 19, start_hour, end_minute),
+        }
+    }
+
+    #[test]
+    fn adjacent_short_events_overlap_after_minimum_height_expansion() {
+        let first = event("first", 11, 0, 15);
+        let second = event("second", 11, 15, 30);
+        let events = vec![first.clone(), second.clone()];
+
+        assert!(rendered_events_overlap(&first, &second, &events, 8));
+    }
+
+    #[test]
+    fn adjacent_long_events_do_not_overlap_after_rendering() {
+        let first = event("first", 11, 0, 30);
+        let second = event("second", 11, 30, 59);
+        let events = vec![first.clone(), second.clone()];
+
+        assert!(!rendered_events_overlap(&first, &second, &events, 8));
     }
 }

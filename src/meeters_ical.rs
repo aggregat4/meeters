@@ -223,7 +223,7 @@ fn extract_start_end_time(
     }
 }
 
-fn parse_zoom_url(text: &str) -> Option<String> {
+pub(crate) fn parse_zoom_url(text: &str) -> Option<String> {
     lazy_static! {
         static ref ZOOM_URL_REGEX: regex::Regex =
             Regex::new(r"https?://[^\s]*zoom.us/(j|my)/[^\s\n\r<>]+").unwrap();
@@ -287,6 +287,7 @@ fn parse_event(
         description,
         location,
         meeturl,
+        metadata: EventMetadata::empty(),
         all_day,
         start_timestamp,
         end_timestamp,
@@ -677,6 +678,7 @@ fn calculate_occurrences(
                 description: parsed_event.description.to_string(),
                 location: parsed_event.location.to_string(),
                 meeturl: parsed_event.meeturl.clone(),
+                metadata: parsed_event.metadata.clone(),
                 all_day: parsed_event.all_day,
                 start_timestamp: *datetime,
                 end_timestamp: end_time,
