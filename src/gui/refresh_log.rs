@@ -9,16 +9,19 @@ fn format_refresh_timestamp(timestamp: Option<DateTime<Local>>) -> String {
 }
 
 pub fn refresh_status_menu_label(refresh_state: &RefreshState) -> String {
+    let prefix = format!("Source: {}", refresh_state.source_label);
     match refresh_state.last_update_successful {
         Some(true) => format!(
-            "Last update: {} (successful)",
+            "{} | Updated: {} (successful)",
+            prefix,
             format_refresh_timestamp(refresh_state.last_attempt_at)
         ),
         Some(false) => format!(
-            "Last update: {} (failed)",
+            "{} | Updated: {} (failed)",
+            prefix,
             format_refresh_timestamp(refresh_state.last_attempt_at)
         ),
-        None => "Last update: never".to_string(),
+        None => format!("{} | Updated: never", prefix),
     }
 }
 
@@ -32,8 +35,9 @@ fn refresh_log_text(refresh_state: &RefreshState) -> String {
     let latest_error = refresh_state.last_error.as_deref().unwrap_or("none");
 
     let mut lines = vec![
+        format!("Source: {}", refresh_state.source_label),
         format!(
-            "Last attempted: {}",
+            "Updated: {}",
             format_refresh_timestamp(refresh_state.last_attempt_at)
         ),
         format!(

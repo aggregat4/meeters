@@ -1,10 +1,10 @@
-# EWS NTLM Keyring Implementation Spec
+# EWS Basic Auth Keyring Implementation Spec
 
 ## Goal
 
 Add an optional Exchange Web Services calendar source for on-prem Exchange installations.
-The first implementation should authenticate with NTLM and store the Exchange password in
-the user's desktop keyring/wallet instead of in the meeters config file.
+The first implementation should authenticate with Basic auth over HTTPS and store the Exchange
+password in the user's desktop keyring/wallet instead of in the meeters config file.
 
 The existing published ICS flow must remain the default and continue to work unchanged.
 
@@ -61,13 +61,10 @@ For EWS:
 MEETERS_CALENDAR_SOURCE=ews
 MEETERS_EWS_URL=https://mail.example.com/EWS/Exchange.asmx
 MEETERS_EWS_USER=user@example.com
-MEETERS_EWS_DOMAIN=EXAMPLE
 ```
 
 `MEETERS_EWS_USER` must be an email/UPN-style value such as `user@example.com`.
 Domain-qualified usernames such as `DOMAIN\user` are not supported in the first version.
-If a separate NTLM domain is required, configure it through `MEETERS_EWS_DOMAIN`.
-`MEETERS_EWS_DOMAIN` should be optional.
 
 The password should be stored outside the config file under a stable keyring entry:
 
@@ -127,27 +124,22 @@ Secret Service provider running. Headless sessions and locked wallets are expect
 
 ## EWS HTTP Client
 
-The existing ICS fetch uses `ureq`, but `ureq` does not provide NTLM authentication.
-
-Use one of:
-
-- `curl` crate with the `ntlm` feature.
-- `ntlmclient` plus `reqwest`, if direct control over NTLM handshake is preferred.
-
-Recommended first implementation: `curl`.
+The existing ICS fetch uses `ureq`. The EWS path should use `reqwest` for straightforward Basic
+auth support.
 
 Reasons:
 
 - The existing refresh loop is synchronous and runs on a worker thread.
-- libcurl already handles HTTP auth negotiation, redirects, TLS, cookies, and NTLM details.
-- The `curl` crate exposes `Auth::ntlm(true)`.
+- Basic auth over HTTPS has the same local credential-storage posture as NTLM for this app,
+  because the app still needs the real Exchange password from the desktop keyring.
+- Avoiding NTLM keeps the first implementation smaller and avoids libcurl build-feature issues.
+- `reqwest::blocking` fits the current synchronous refresh loop.
 
 The EWS client must:
 
 - Set a global/request timeout.
 - Disable following redirects for EWS SOAP requests unless there is a specific reason.
 - Send all SOAP requests to the configured `MEETERS_EWS_URL`.
-- Use NTLM only, not `Auth::auto`, to avoid silently falling back to Basic.
 - Avoid logging passwords, authorization headers, or full request headers.
 
 ## Calendar Fetch Strategy
@@ -216,7 +208,7 @@ src/secrets.rs
 `ews.rs`:
 
 - Builds SOAP XML requests.
-- Sends EWS requests using NTLM.
+- Sends EWS requests using Basic auth over HTTPS.
 - Parses EWS SOAP responses.
 - Converts EWS calendar items into `Event`.
 
@@ -290,7 +282,7 @@ Phase 2:
 
 - Improve XML fixtures and parsing coverage.
 - Add optional GTK password setup dialog if useful.
-- Evaluate Kerberos/Negotiate support.
+- Evaluate Kerberos/Negotiate support if Basic auth becomes unavailable.
 
 Phase 3:
 

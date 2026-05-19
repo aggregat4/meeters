@@ -4,45 +4,28 @@ use std::thread;
 use chrono::prelude::*;
 use chrono_tz::Tz;
 use gtk::prelude::*;
-use ureq::Agent;
 
+use crate::calendar_source::CalendarSource;
 use crate::config::Config;
 use crate::domain::{Event, RefreshState};
 use crate::CalendarMessages::{DayEvents, EventNotification, RefreshStateChanged};
-use domain::CalendarError;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod binary_search;
+mod calendar_source;
 mod config;
 mod custom_timezone;
 mod domain;
+mod ews;
 mod gui;
 mod ical_util;
 mod logging;
 mod meeters_ical;
+mod secrets;
 mod timezones;
 mod windows_timezones;
 
 use std::sync::Arc;
-
-fn get_ical(url: &str) -> Result<String, CalendarError> {
-    log::debug!("fetching calendar data");
-    let config = Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(5)))
-        .build();
-    let agent: Agent = config.into();
-    agent
-        .get(url)
-        .call()
-        .map_err(|e| CalendarError {
-            msg: format!("Error calling calendar URL: {}", e),
-        })?
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| CalendarError {
-            msg: format!("Error reading calendar response body: {}", e),
-        })
-}
 
 fn get_events_for_interval(
     events: Vec<Event>,
@@ -125,15 +108,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("local timezone configured as {}", config.local_tz_iana);
 
     let local_tz = config.local_tz;
-    let ical_url = config.ical_url.clone();
+    let calendar_source_config = config.calendar_source.clone();
     let show_event_notification = config.show_event_notification;
     let use_zoommtg = config.use_zoommtg;
     let polling_interval_ms = config.polling_interval_ms;
     let event_warning_time_seconds = config.event_warning_time_seconds;
     let future_days = config.future_days;
+    let calendar_source_label = calendar_source_config.display_label();
 
     let refresh_state = Arc::new(std::sync::Mutex::new(RefreshState::new(
         REFRESH_LOG_CAPACITY,
+        calendar_source_label,
     )));
 
     // Initialize GUI components
@@ -146,6 +131,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (events_sender, events_receiver) = async_channel::bounded::<CalendarMessages>(10);
+    let (password_prompt_sender, password_prompt_receiver) =
+        async_channel::bounded::<calendar_source::EwsPasswordPrompt>(1);
     let window_manager_clone = Arc::clone(&window_manager);
 
     glib::MainContext::default().spawn_local(async move {
@@ -188,6 +175,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::warn!("calendar GUI message channel closed");
     });
 
+    let window_manager_clone = Arc::clone(&window_manager);
+    glib::MainContext::default().spawn_local(async move {
+        while let Ok(prompt) = password_prompt_receiver.recv().await {
+            let parent = {
+                let wm = window_manager_clone.lock().unwrap();
+                wm.current_window.clone()
+            };
+            let password = gui::show_ews_password_dialog(
+                parent.as_ref(),
+                &prompt.endpoint,
+                &prompt.user,
+                prompt.replacing_existing_password,
+            );
+            if let Err(e) = prompt.response_sender.send(password) {
+                log::warn!("could not return EWS password prompt result: {}", e);
+            }
+        }
+        log::warn!("EWS password prompt channel closed");
+    });
+
     // Handle D-Bus requests in the main GTK thread
     let window_manager_clone = Arc::clone(&window_manager);
 
@@ -210,6 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // start the background thread for calendar work
     thread::spawn(move || {
+        let calendar_source = CalendarSource::new(calendar_source_config, password_prompt_sender);
         let mut last_download_time = 0;
         let mut last_events: Vec<Event> = vec![];
         let mut notified_event_keys: HashSet<EventNotificationKey> = HashSet::new();
@@ -220,16 +228,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .as_millis();
             if last_download_time == 0 || current_time - last_download_time > polling_interval_ms {
                 last_download_time = current_time;
-                match get_ical(&ical_url)
-                    .and_then(|t| meeters_ical::extract_events(&t, &local_tz, use_zoommtg))
-                {
+                let local_date = Local::now().date_naive();
+                let fetch_start = local_tz
+                    .with_ymd_and_hms(
+                        local_date.year(),
+                        local_date.month(),
+                        local_date.day(),
+                        0,
+                        0,
+                        0,
+                    )
+                    .unwrap();
+                let fetch_end_date = local_date + chrono::Duration::days(future_days as i64);
+                let fetch_end = local_tz
+                    .with_ymd_and_hms(
+                        fetch_end_date.year(),
+                        fetch_end_date.month(),
+                        fetch_end_date.day(),
+                        23,
+                        59,
+                        59,
+                    )
+                    .unwrap();
+                match calendar_source.fetch_events(&local_tz, use_zoommtg, fetch_start, fetch_end) {
                     Ok(events) => {
                         {
                             let mut state = refresh_state.lock().unwrap();
                             state.record_success(events.len());
                         }
                         log::info!("successfully got {} events", events.len());
-                        let local_date = Local::now().date_naive();
 
                         // Get events for each day
                         let mut day_events = Vec::new();
@@ -334,6 +361,7 @@ mod tests {
             description: String::new(),
             location: String::new(),
             meeturl: None,
+            metadata: domain::EventMetadata::empty(),
             all_day: false,
             start_timestamp,
             end_timestamp,

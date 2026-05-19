@@ -21,7 +21,7 @@ const DEFAULT_LOCAL_TIMEZONE: &str = "Europe/Berlin";
 pub struct Config {
     pub local_tz_iana: String,
     pub local_tz: Tz,
-    pub ical_url: String,
+    pub calendar_source: CalendarSourceConfig,
     pub show_event_notification: bool,
     pub use_zoommtg: bool,
     pub polling_interval_ms: u128,
@@ -29,6 +29,21 @@ pub struct Config {
     pub start_hour: i32,
     pub end_hour: i32,
     pub future_days: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CalendarSourceConfig {
+    Ics { url: String },
+    Ews { url: String, user: String },
+}
+
+impl CalendarSourceConfig {
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            CalendarSourceConfig::Ics { .. } => "ICS",
+            CalendarSourceConfig::Ews { .. } => "EWS",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -86,8 +101,7 @@ impl Config {
             ))
         })?;
 
-        let ical_url = lookup("MEETERS_ICAL_URL")
-            .ok_or_else(|| ConfigError::new("MEETERS_ICAL_URL is required"))?;
+        let calendar_source = parse_calendar_source(&mut lookup)?;
 
         let show_event_notification = parse_bool(
             lookup("MEETERS_EVENT_NOTIFICATION"),
@@ -139,7 +153,7 @@ impl Config {
         Ok(Config {
             local_tz_iana,
             local_tz,
-            ical_url,
+            calendar_source,
             show_event_notification,
             use_zoommtg,
             polling_interval_ms,
@@ -149,6 +163,46 @@ impl Config {
             future_days,
         })
     }
+}
+
+fn parse_calendar_source<F>(lookup: &mut F) -> Result<CalendarSourceConfig, ConfigError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let source = lookup("MEETERS_CALENDAR_SOURCE").unwrap_or_else(|| "ics".to_string());
+    match source.as_str() {
+        "ics" => {
+            let url = lookup("MEETERS_ICAL_URL")
+                .ok_or_else(|| ConfigError::new("MEETERS_ICAL_URL is required"))?;
+            Ok(CalendarSourceConfig::Ics { url })
+        }
+        "ews" => {
+            let url = lookup("MEETERS_EWS_URL")
+                .ok_or_else(|| ConfigError::new("MEETERS_EWS_URL is required for EWS"))?;
+            let user = lookup("MEETERS_EWS_USER")
+                .ok_or_else(|| ConfigError::new("MEETERS_EWS_USER is required for EWS"))?;
+            validate_ews_user(&user)?;
+            Ok(CalendarSourceConfig::Ews { url, user })
+        }
+        other => Err(ConfigError::new(format!(
+            "MEETERS_CALENDAR_SOURCE must be 'ics' or 'ews', got '{}'",
+            other
+        ))),
+    }
+}
+
+fn validate_ews_user(user: &str) -> Result<(), ConfigError> {
+    if user.contains('\\') {
+        return Err(ConfigError::new(
+            "MEETERS_EWS_USER must use email form, not DOMAIN\\user",
+        ));
+    }
+    if !user.contains('@') {
+        return Err(ConfigError::new(
+            "MEETERS_EWS_USER must be an email address such as user@example.com",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_bool(value: Option<String>, name: &str, default_value: bool) -> Result<bool, ConfigError> {
@@ -258,7 +312,12 @@ mod tests {
                 .unwrap();
 
         assert_eq!(config.local_tz_iana, "Europe/Berlin");
-        assert_eq!(config.ical_url, "https://example.com/calendar.ics");
+        assert_eq!(
+            config.calendar_source,
+            CalendarSourceConfig::Ics {
+                url: "https://example.com/calendar.ics".to_string()
+            }
+        );
         assert!(config.show_event_notification);
         assert!(!config.use_zoommtg);
         assert_eq!(config.polling_interval_ms, DEFAULT_POLLING_INTERVAL_MS);
@@ -347,5 +406,76 @@ mod tests {
 
         assert!(error.to_string().contains("MEETERS_FUTURE_DAYS"));
         assert!(error.to_string().contains("greater than or equal to 0"));
+    }
+
+    #[test]
+    fn loads_ews_calendar_source() {
+        let config = config_from_values(&[
+            ("MEETERS_CALENDAR_SOURCE", "ews"),
+            (
+                "MEETERS_EWS_URL",
+                "https://mail.example.com/EWS/Exchange.asmx",
+            ),
+            ("MEETERS_EWS_USER", "user@example.com"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.calendar_source,
+            CalendarSourceConfig::Ews {
+                url: "https://mail.example.com/EWS/Exchange.asmx".to_string(),
+                user: "user@example.com".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn ews_source_does_not_require_ical_url() {
+        let config = config_from_values(&[
+            ("MEETERS_CALENDAR_SOURCE", "ews"),
+            (
+                "MEETERS_EWS_URL",
+                "https://mail.example.com/EWS/Exchange.asmx",
+            ),
+            ("MEETERS_EWS_USER", "user@example.com"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.calendar_source,
+            CalendarSourceConfig::Ews {
+                url: "https://mail.example.com/EWS/Exchange.asmx".to_string(),
+                user: "user@example.com".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_calendar_source() {
+        let error = config_from_values(&[
+            ("MEETERS_CALENDAR_SOURCE", "exchange"),
+            ("MEETERS_ICAL_URL", "https://example.com/calendar.ics"),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("MEETERS_CALENDAR_SOURCE"));
+        assert!(error.to_string().contains("ics"));
+        assert!(error.to_string().contains("ews"));
+    }
+
+    #[test]
+    fn rejects_domain_qualified_ews_user() {
+        let error = config_from_values(&[
+            ("MEETERS_CALENDAR_SOURCE", "ews"),
+            (
+                "MEETERS_EWS_URL",
+                "https://mail.example.com/EWS/Exchange.asmx",
+            ),
+            ("MEETERS_EWS_USER", "EXAMPLE\\user"),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("MEETERS_EWS_USER"));
+        assert!(error.to_string().contains("email form"));
     }
 }

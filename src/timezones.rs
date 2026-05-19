@@ -1,11 +1,11 @@
 use crate::custom_timezone::CustomTz;
 use crate::custom_timezone::FixedTimespan;
 use crate::custom_timezone::FixedTimespanSet;
+use crate::domain::CalendarError;
 use crate::ical_util::find_property;
 use crate::ical_util::find_property_value;
 use crate::ical_util::properties_to_string;
 use crate::ical_util::unescape_string;
-use crate::CalendarError;
 use chrono::prelude::*;
 use chrono::DateTime;
 use chrono_tz::Tz;
