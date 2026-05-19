@@ -1,5 +1,5 @@
 use crate::config::get_config_directory;
-use crate::domain::{Event, RefreshState, ONLINE_MEETING_MARKER};
+use crate::domain::{Event, RefreshState, ResponseStatus, ONLINE_MEETING_MARKER};
 use crate::gui::actions::open_meeting;
 use crate::gui::refresh_log::{refresh_status_menu_label, show_refresh_log_dialog};
 use crate::gui::window::WindowManager;
@@ -224,16 +224,11 @@ fn show_event_notification_now(event: Event) {
         event.start_timestamp.format("%H:%M"),
         event.summary
     );
+    let notification_body = notification_body(&event);
     let mut notification = Notification::new();
     notification
         .summary(summary_str)
-        .body(
-            &event
-                .meeturl
-                .clone()
-                .or_else(|| Some("No Zoom Meeting".to_string()))
-                .unwrap(),
-        )
+        .body(&notification_body)
         .icon("appointment-new")
         .urgency(notify_rust::Urgency::Critical)
         .timeout(Timeout::Never);
@@ -260,4 +255,84 @@ fn show_event_notification_now(event: Event) {
     }
 }
 
+fn notification_body(event: &Event) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        event
+            .meeturl
+            .clone()
+            .unwrap_or_else(|| "No Zoom Meeting".to_string()),
+    );
+
+    let declined_rooms = event
+        .metadata
+        .rooms
+        .iter()
+        .filter(|room| room.response == Some(ResponseStatus::Declined))
+        .map(|room| format!("{}: DECLINED", room.name))
+        .collect::<Vec<_>>();
+
+    if !declined_rooms.is_empty() {
+        let label = if declined_rooms.len() == 1 {
+            "Room"
+        } else {
+            "Rooms"
+        };
+        lines.push(format!("{}: {}", label, declined_rooms.join(", ")));
+    }
+
+    lines.join("\n")
+}
+
 const MEETERS_NOTIFICATION_ACTION_OPEN_MEETING: &str = "meeters_open_meeting:";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{EventMetadata, Participant};
+
+    fn event_with_rooms(rooms: Vec<Participant>) -> Event {
+        Event {
+            summary: "Planning".to_string(),
+            description: String::new(),
+            location: String::new(),
+            meeturl: Some("https://example.com/meeting".to_string()),
+            metadata: EventMetadata {
+                organizer: None,
+                rooms,
+                required_attendees: Vec::new(),
+                optional_attendees: Vec::new(),
+            },
+            all_day: false,
+            start_timestamp: chrono_tz::Europe::Berlin
+                .with_ymd_and_hms(2026, 5, 19, 9, 0, 0)
+                .unwrap(),
+            end_timestamp: chrono_tz::Europe::Berlin
+                .with_ymd_and_hms(2026, 5, 19, 9, 30, 0)
+                .unwrap(),
+        }
+    }
+
+    #[test]
+    fn notification_body_includes_declined_room() {
+        let event = event_with_rooms(vec![Participant {
+            name: "Room 3A".to_string(),
+            response: Some(ResponseStatus::Declined),
+        }]);
+
+        assert_eq!(
+            notification_body(&event),
+            "https://example.com/meeting\nRoom: Room 3A: DECLINED"
+        );
+    }
+
+    #[test]
+    fn notification_body_omits_accepted_room() {
+        let event = event_with_rooms(vec![Participant {
+            name: "Room 3A".to_string(),
+            response: Some(ResponseStatus::Accepted),
+        }]);
+
+        assert_eq!(notification_body(&event), "https://example.com/meeting");
+    }
+}
