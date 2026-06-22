@@ -11,6 +11,7 @@ pub const HOUR_HEIGHT: i32 = 80;
 pub const TIMELINE_MIN_WIDTH: i32 = 600;
 pub const DAY_MIN_WIDTH: i32 = 700;
 const MINIMUM_RENDERED_OVERLAP_FOR_COLUMNS: i32 = 2;
+const COMPACT_EVENT_HEIGHT: i32 = 48;
 
 fn event_button_width(group_size: i32, spacing: i32) -> i32 {
     ((TIMELINE_MIN_WIDTH - (spacing * (group_size + 1))) / group_size).max(200)
@@ -61,10 +62,44 @@ fn rendered_events_overlap(a: &Event, b: &Event, events: &[Event], start_hour: i
 }
 
 fn compact_room_label(event: &Event) -> Option<String> {
-    match event.metadata.rooms.as_slice() {
+    let label = match event.metadata.rooms.as_slice() {
         [] => None,
-        [room] => Some(room.display_text()),
-        [first, rest @ ..] => Some(format!("{} +{}", first.display_text(), rest.len())),
+        [room] => Some(room.name.clone()),
+        [first, rest @ ..] => Some(format!("{} +{}", first.name.as_str(), rest.len())),
+    }?;
+
+    if event.metadata.has_declined_room() {
+        Some(format!("{}{}", label, DECLINED_ROOM_MARKER))
+    } else {
+        Some(label)
+    }
+}
+
+fn event_button_text(event: &Event, show_time: bool, compact: bool) -> String {
+    let markers = if event.meeturl.is_some() {
+        ONLINE_MEETING_MARKER
+    } else {
+        ""
+    };
+    let room_suffix = compact_room_label(event);
+
+    let event_text = if show_time {
+        let event_start = event.start_timestamp.with_timezone(&Local);
+        let event_end = event.end_timestamp.with_timezone(&Local);
+        let time_str = format!(
+            "{} - {}",
+            event_start.format("%H:%M"),
+            event_end.format("%H:%M")
+        );
+        format!("{}  {}{}", time_str, event.summary, markers)
+    } else {
+        format!("{}{}", event.summary, markers)
+    };
+
+    match room_suffix {
+        Some(room) if compact => format!("{} - {}", event_text, room),
+        Some(room) => format!("{}\n{}", event_text, room),
+        None => event_text,
     }
 }
 
@@ -157,39 +192,17 @@ impl TimelineView {
             ),
         );
 
-        let markers = format!(
-            "{}{}",
-            if event.meeturl.is_some() {
-                ONLINE_MEETING_MARKER
-            } else {
-                ""
-            },
-            if event.metadata.has_declined_room() {
-                DECLINED_ROOM_MARKER
-            } else {
-                ""
-            }
-        );
-        let room_suffix = compact_room_label(event)
-            .map(|room| format!("\n{}", room))
-            .unwrap_or_default();
-
-        let text = if show_time {
-            let event_start = event.start_timestamp.with_timezone(&Local);
-            let event_end = event.end_timestamp.with_timezone(&Local);
-            let time_str = format!(
-                "{} - {}",
-                event_start.format("%H:%M"),
-                event_end.format("%H:%M")
-            );
-            format!("{}  {}{}{}", time_str, event.summary, markers, room_suffix)
-        } else {
-            format!("{}{}{}", event.summary, markers, room_suffix)
-        };
+        let compact = show_time && height < COMPACT_EVENT_HEIGHT;
+        let text = event_button_text(event, show_time, compact);
 
         let label = gtk::Label::new(Some(&text));
-        label.set_wrap(true);
-        label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        label.set_wrap(!compact);
+        if compact {
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.set_lines(1);
+        } else {
+            label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        }
         label.set_justify(gtk::Justification::Left);
         label.set_xalign(0.0);
         label.set_margin_start(8);
@@ -399,7 +412,7 @@ impl TimelineView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::EventMetadata;
+    use crate::domain::{EventMetadata, Participant, ResponseStatus};
     use chrono_tz::Tz;
 
     #[test]
@@ -454,6 +467,22 @@ mod tests {
         }
     }
 
+    fn event_with_rooms(
+        summary: &str,
+        start_hour: u32,
+        start_minute: u32,
+        end_minute: u32,
+        rooms: Vec<Participant>,
+    ) -> Event {
+        Event {
+            metadata: EventMetadata {
+                rooms,
+                ..EventMetadata::empty()
+            },
+            ..event(summary, start_hour, start_minute, end_minute)
+        }
+    }
+
     #[test]
     fn adjacent_short_events_overlap_after_minimum_height_expansion() {
         let first = event("first", 11, 0, 15);
@@ -470,5 +499,62 @@ mod tests {
         let events = vec![first.clone(), second.clone()];
 
         assert!(!rendered_events_overlap(&first, &second, &events, 8));
+    }
+
+    #[test]
+    fn compact_event_text_keeps_room_inline_without_accepted_state() {
+        let event = event_with_rooms(
+            "Planning",
+            16,
+            0,
+            30,
+            vec![Participant {
+                name: "Room 12".to_string(),
+                response: Some(ResponseStatus::Accepted),
+            }],
+        );
+
+        assert_eq!(
+            event_button_text(&event, true, true),
+            "16:00 - 16:30  Planning - Room 12"
+        );
+    }
+
+    #[test]
+    fn compact_event_text_marks_declined_room_inline() {
+        let event = event_with_rooms(
+            "Planning",
+            16,
+            0,
+            30,
+            vec![Participant {
+                name: "Room 12".to_string(),
+                response: Some(ResponseStatus::Declined),
+            }],
+        );
+
+        assert_eq!(
+            event_button_text(&event, true, true),
+            "16:00 - 16:30  Planning - Room 12 !"
+        );
+    }
+
+    #[test]
+    fn regular_event_text_keeps_room_on_second_line() {
+        let event = event_with_rooms(
+            "Planning",
+            16,
+            0,
+            30,
+            vec![Participant {
+                name: "Room 12".to_string(),
+                response: Some(ResponseStatus::Accepted),
+            }],
+        );
+
+        assert_eq!(
+            event_button_text(&event, true, false),
+            "16:00 - 16:30  Planning\nRoom 12"
+        );
     }
 }
