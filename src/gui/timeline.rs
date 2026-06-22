@@ -84,14 +84,7 @@ fn event_button_text(event: &Event, show_time: bool, compact: bool) -> String {
     let room_suffix = compact_room_label(event);
 
     let event_text = if show_time {
-        let event_start = event.start_timestamp.with_timezone(&Local);
-        let event_end = event.end_timestamp.with_timezone(&Local);
-        let time_str = format!(
-            "{} - {}",
-            event_start.format("%H:%M"),
-            event_end.format("%H:%M")
-        );
-        format!("{}  {}{}", time_str, event.summary, markers)
+        format!("{}  {}{}", event_time_range(event), event.summary, markers)
     } else {
         format!("{}{}", event.summary, markers)
     };
@@ -101,6 +94,17 @@ fn event_button_text(event: &Event, show_time: bool, compact: bool) -> String {
         Some(room) => format!("{}\n{}", event_text, room),
         None => event_text,
     }
+}
+
+fn event_time_range(event: &Event) -> String {
+    let event_start = event.start_timestamp.with_timezone(&Local);
+    let event_end = event.end_timestamp.with_timezone(&Local);
+
+    format!(
+        "{} - {}",
+        event_start.format("%H:%M"),
+        event_end.format("%H:%M")
+    )
 }
 
 fn participant_list(participants: &[crate::domain::Participant]) -> String {
@@ -119,60 +123,148 @@ fn room_list(participants: &[crate::domain::Participant]) -> String {
         .join(", ")
 }
 
-fn event_tooltip_text(event: &Event) -> Option<String> {
-    let mut lines = Vec::new();
-
-    if let Some(organizer) = &event.metadata.organizer {
-        lines.push(format!("Organizer: {}", organizer));
-    }
-    if !event.metadata.rooms.is_empty() {
-        let label = if event.metadata.rooms.len() == 1 {
-            "Room"
-        } else {
-            "Rooms"
-        };
-        lines.push(format!("{}: {}", label, room_list(&event.metadata.rooms)));
-    }
-    if !event.metadata.required_attendees.is_empty() {
-        lines.push(format!(
-            "Required: {}",
-            participant_list(&event.metadata.required_attendees)
-        ));
-    }
-    if !event.metadata.optional_attendees.is_empty() {
-        lines.push(format!(
-            "Optional: {}",
-            participant_list(&event.metadata.optional_attendees)
-        ));
-    }
-
-    let trimmed_description = event.description.trim();
-    if !trimmed_description.is_empty() {
-        if !lines.is_empty() {
-            lines.push(String::new());
-        }
-        lines.push(trimmed_description.to_string());
-    }
-
-    if lines.is_empty() {
-        None
-    } else {
-        Some(lines.join("\n"))
-    }
-}
-
 pub struct TimelineView {
     pub container: gtk::Box,
 }
 
 impl TimelineView {
+    fn selectable_label(text: &str, color: &str, extra_css: &str) -> gtk::Label {
+        let label = gtk::Label::new(Some(text));
+        label.set_selectable(true);
+        label.set_xalign(0.0);
+        label.set_line_wrap(true);
+        label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+        label.set_max_width_chars(58);
+        style_label_with_css(&label, color, extra_css);
+
+        label
+    }
+
+    fn add_detail_row(container: &gtk::Box, label: &str, value: &str) {
+        if value.trim().is_empty() {
+            return;
+        }
+
+        let row = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let label_widget =
+            Self::selectable_label(label, TEXT_SUBTLE, "font-size: 11px; font-weight: 700;");
+        let value_widget = Self::selectable_label(value, "#242a31", "font-size: 13px;");
+
+        row.pack_start(&label_widget, false, false, 0);
+        row.pack_start(&value_widget, false, false, 0);
+        container.pack_start(&row, false, false, 0);
+    }
+
+    fn add_description(container: &gtk::Box, description: &str) {
+        let trimmed_description = description.trim();
+        if trimmed_description.is_empty() {
+            return;
+        }
+
+        let label = Self::selectable_label(
+            "Description",
+            TEXT_SUBTLE,
+            "font-size: 11px; font-weight: 700;",
+        );
+        container.pack_start(&label, false, false, 0);
+
+        let scrolled_window =
+            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        scrolled_window.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+        scrolled_window.set_min_content_width(420);
+        scrolled_window.set_min_content_height(90);
+        scrolled_window.set_max_content_height(220);
+
+        let text_view = gtk::TextView::new();
+        text_view.set_editable(false);
+        text_view.set_cursor_visible(true);
+        text_view.set_wrap_mode(gtk::WrapMode::WordChar);
+        text_view
+            .buffer()
+            .expect("TextView buffer must exist")
+            .set_text(trimmed_description);
+        load_css(
+            &text_view.style_context(),
+            "textview, textview text { \
+                background-color: #ffffff; \
+                color: #242a31; \
+                font-size: 13px; \
+            }",
+        );
+
+        scrolled_window.add(&text_view);
+        container.pack_start(&scrolled_window, true, true, 0);
+    }
+
+    fn create_event_popover(event: &Event, button: &gtk::Button) -> gtk::Popover {
+        let popover = gtk::Popover::new(Some(button));
+        popover.set_position(gtk::PositionType::Bottom);
+
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
+        content.set_margin_top(12);
+        content.set_margin_bottom(12);
+        content.set_size_request(460, -1);
+
+        let title = Self::selectable_label(
+            &event.summary,
+            "#242a31",
+            "font-size: 15px; font-weight: 700;",
+        );
+        content.pack_start(&title, false, false, 0);
+
+        Self::add_detail_row(&content, "Time", &event_time_range(event));
+
+        if let Some(organizer) = &event.metadata.organizer {
+            Self::add_detail_row(&content, "Organizer", organizer);
+        }
+        if !event.metadata.rooms.is_empty() {
+            let label = if event.metadata.rooms.len() == 1 {
+                "Room"
+            } else {
+                "Rooms"
+            };
+            Self::add_detail_row(&content, label, &room_list(&event.metadata.rooms));
+        }
+        if !event.metadata.required_attendees.is_empty() {
+            Self::add_detail_row(
+                &content,
+                "Required",
+                &participant_list(&event.metadata.required_attendees),
+            );
+        }
+        if !event.metadata.optional_attendees.is_empty() {
+            Self::add_detail_row(
+                &content,
+                "Optional",
+                &participant_list(&event.metadata.optional_attendees),
+            );
+        }
+
+        Self::add_description(&content, &event.description);
+
+        if let Some(meet_url) = &event.meeturl {
+            let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let join_button = gtk::Button::with_label("Join");
+            let url = meet_url.clone();
+            join_button.connect_clicked(move |_| {
+                open_meeting(&url);
+            });
+            actions.pack_start(&join_button, false, false, 0);
+
+            let link_button = gtk::LinkButton::with_label(meet_url, "Meeting link");
+            actions.pack_start(&link_button, false, false, 0);
+            content.pack_start(&actions, false, false, 0);
+        }
+
+        popover.add(&content);
+        popover
+    }
+
     fn create_event_button(event: &Event, width: i32, height: i32, show_time: bool) -> gtk::Button {
         let button = gtk::Button::new();
         button.set_size_request(width, height.max(30));
-
-        if let Some(tooltip_text) = event_tooltip_text(event) {
-            button.set_tooltip_text(Some(&tooltip_text));
-        }
 
         let palette = event_palette(event);
 
@@ -212,12 +304,11 @@ impl TimelineView {
         style_label(&label, palette.text);
         button.set_child(Some(&label));
 
-        if let Some(meet_url) = &event.meeturl {
-            let url = meet_url.clone();
-            button.connect_clicked(move |_| {
-                open_meeting(&url);
-            });
-        }
+        let popover = Self::create_event_popover(event, &button);
+        button.connect_clicked(move |_| {
+            popover.show_all();
+            popover.popup();
+        });
 
         button
     }
