@@ -16,6 +16,8 @@ const DEFAULT_END_HOUR: i32 = 20;
 /// Default number of future days to show (1 = today + tomorrow)
 const DEFAULT_FUTURE_DAYS: i32 = 1;
 const DEFAULT_LOCAL_TIMEZONE: &str = "Europe/Berlin";
+const DEFAULT_ICAL_USER_AGENT: &str =
+    "Mozilla/5.0 (X11; Linux x86_64; rv:154.0) Gecko/20100101 Firefox/154.0";
 
 #[derive(Debug)]
 pub struct Config {
@@ -33,7 +35,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CalendarSourceConfig {
-    Ics { url: String },
+    Ics { url: String, user_agent: String },
     Ews { url: String, user: String },
 }
 
@@ -174,7 +176,9 @@ where
         "ics" => {
             let url = lookup("MEETERS_ICAL_URL")
                 .ok_or_else(|| ConfigError::new("MEETERS_ICAL_URL is required"))?;
-            Ok(CalendarSourceConfig::Ics { url })
+            let user_agent = lookup("MEETERS_ICAL_USER_AGENT")
+                .unwrap_or_else(|| DEFAULT_ICAL_USER_AGENT.to_string());
+            Ok(CalendarSourceConfig::Ics { url, user_agent })
         }
         "ews" => {
             let url = lookup("MEETERS_EWS_URL")
@@ -315,7 +319,8 @@ mod tests {
         assert_eq!(
             config.calendar_source,
             CalendarSourceConfig::Ics {
-                url: "https://example.com/calendar.ics".to_string()
+                url: "https://example.com/calendar.ics".to_string(),
+                user_agent: DEFAULT_ICAL_USER_AGENT.to_string(),
             }
         );
         assert!(config.show_event_notification);
@@ -353,6 +358,23 @@ mod tests {
         assert_eq!(config.start_hour, 7);
         assert_eq!(config.end_hour, 18);
         assert_eq!(config.future_days, 3);
+    }
+
+    #[test]
+    fn loads_ical_user_agent_override() {
+        let config = config_from_values(&[
+            ("MEETERS_ICAL_URL", "https://example.com/calendar.ics"),
+            ("MEETERS_ICAL_USER_AGENT", "CustomCalendarClient/1.0"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.calendar_source,
+            CalendarSourceConfig::Ics {
+                url: "https://example.com/calendar.ics".to_string(),
+                user_agent: "CustomCalendarClient/1.0".to_string(),
+            }
+        );
     }
 
     #[test]

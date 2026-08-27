@@ -53,6 +53,7 @@ The following properties are supported:
 |----------|----------|---------------|-------------|
 | MEETERS_CALENDAR_SOURCE | no | ics | Calendar source to use. Supported values: `ics` and `ews`. |
 | MEETERS_ICAL_URL | yes for `ics` | - | The HTTP URL to your ical calendar |
+| MEETERS_ICAL_USER_AGENT | no | Firefox 154 for Linux | The HTTP `User-Agent` sent when retrieving an ICS calendar. Defaults to `Mozilla/5.0 (X11; Linux x86_64; rv:154.0) Gecko/20100101 Firefox/154.0`. Some (all?) versions of Exchange no longer accept requests with non-browser User-Agent headers. |
 | MEETERS_EWS_URL | yes for `ews` | - | The direct Exchange Web Services endpoint, typically ending in `/EWS/Exchange.asmx`. |
 | MEETERS_EWS_USER | yes for `ews` | - | The Exchange user in email form, for example `user@example.com`. |
 | MEETERS_LOCAL_TIMEZONE | no | Europe/Berlin | The local timezone where all times will be converted to. Make sure you set this to a valid IANA timezone identifier if you are not in the default timezone |

@@ -44,7 +44,7 @@ impl CalendarSource {
         end_time: DateTime<Tz>,
     ) -> Result<Vec<Event>, CalendarError> {
         match &self.config {
-            CalendarSourceConfig::Ics { url } => get_ical(url)
+            CalendarSourceConfig::Ics { url, user_agent } => get_ical(url, user_agent)
                 .and_then(|text| meeters_ical::extract_events(&text, local_tz, use_zoommtg)),
             CalendarSourceConfig::Ews { url, user } => self.fetch_ews_events(
                 &EwsConfig {
@@ -138,7 +138,7 @@ impl CalendarSource {
     }
 }
 
-fn get_ical(url: &str) -> Result<String, CalendarError> {
+fn get_ical(url: &str, user_agent: &str) -> Result<String, CalendarError> {
     log::debug!("fetching calendar data from ICS source");
     let config = Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(5)))
@@ -146,6 +146,7 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
     let agent: Agent = config.into();
     agent
         .get(url)
+        .header("User-Agent", user_agent)
         .call()
         .map_err(|e| CalendarError {
             msg: format!("Error calling calendar URL: {}", e),
@@ -155,6 +156,49 @@ fn get_ical(url: &str) -> Result<String, CalendarError> {
         .map_err(|e| CalendarError {
             msg: format!("Error reading calendar response body: {}", e),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    use super::get_ical;
+
+    #[test]
+    fn sends_configured_user_agent_to_ical_source() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.ends_with(b"\r\n\r\n") {
+                let bytes_read = stream.read(&mut buffer).unwrap();
+                assert_ne!(bytes_read, 0, "connection closed before request headers");
+                request.extend_from_slice(&buffer[..bytes_read]);
+            }
+
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ncalendar",
+                )
+                .unwrap();
+
+            String::from_utf8_lossy(&request).into_owned()
+        });
+
+        let calendar = get_ical(
+            &format!("http://{}/calendar.ics", address),
+            "CustomCalendarClient/1.0",
+        )
+        .unwrap();
+
+        assert_eq!(calendar, "calendar");
+        let request = server.join().unwrap().to_ascii_lowercase();
+        assert!(request.contains("user-agent: customcalendarclient/1.0\r\n"));
+    }
 }
 
 fn map_ews_error(error: EwsError) -> CalendarError {
