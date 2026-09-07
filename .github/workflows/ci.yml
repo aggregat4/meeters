@@ -13,21 +13,30 @@ env:
 
 jobs:
   build_and_test:
+    # Build and run against our oldest supported system GTK and glibc.
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        rust: ["1.92.0", stable]
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-    - uses: Swatinem/rust-cache@v1
+    - uses: actions/checkout@v6
+    - name: Install Rust
+      env:
+        RUST_TOOLCHAIN: ${{ matrix.rust }}
+      run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+        rustup override set "$RUST_TOOLCHAIN"
+    - uses: Swatinem/rust-cache@v2
     - name: Install Linux build deps
-      run: sudo apt update && sudo apt install -y libdbus-1-dev libgtk-4-dev xvfb xauth xdotool dbus-x11 python3-dbus python3-gi
+      run: sudo apt update && sudo apt install -y libdbus-1-dev libgtk-4-dev xvfb xauth xdotool dbus-x11 python3-dbus python3-gi binutils
     - name: Build
-      run: cargo build --locked --verbose
+      run: cargo build --locked --release --verbose
+    - name: Check release glibc requirements
+      run: /usr/bin/python3 tests/check_glibc.py target/release/meeters --max-version 2.35
     - name: Run tests
       run: cargo test --locked --verbose
     - name: Desktop smoke tests
+      timeout-minutes: 5
       run: |
-        dbus-run-session -- xvfb-run -a python3 tests/desktop_smoke.py target/debug/meeters
+        dbus-run-session -- xvfb-run -a /usr/bin/python3 tests/desktop_smoke.py target/release/meeters
         GTK_A11Y=none GSK_RENDERER=cairo dbus-run-session -- xvfb-run -a cargo test --locked gtk4_window_and_password_dialogs -- --ignored --test-threads=1

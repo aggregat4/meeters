@@ -2,7 +2,7 @@ This is a graphical (GTK4) utility for Linux that lives in the tray as an app in
 
 # Building
 
-Requires Rust 1.88 or newer, GTK4 development libraries, and D-Bus development libraries.
+Requires Rust 1.92 or newer, GTK4 development libraries, and D-Bus development libraries.
 On Ubuntu/Debian, install them with `sudo apt install libgtk-4-dev libdbus-1-dev`.
 
 1. Clone repo
@@ -125,3 +125,21 @@ The smoke test provides its own calendar and tray host. It does not use your
 calendar configuration or keyring. Before releasing, also check tray icon rendering,
 notification links, password storage, and window presentation on the target desktop,
 including Wayland where supported.
+
+# Linux compatibility baseline
+
+Native release binaries target **Ubuntu 22.04 LTS and newer**, using Ubuntu 22.04's
+system GTK 4.6 and glibc 2.35 as the compatibility baseline. New Rust bindings do
+not authorize enabling APIs that require newer system libraries.
+
+CI builds and runs the release binary on Ubuntu 22.04 with both Rust 1.92.0 and
+stable, including the desktop smoke test. CI and release packaging also reject
+binaries requiring glibc symbols newer than 2.35:
+
+```bash
+python3 tests/check_glibc.py target/release/meeters --max-version 2.35
+```
+
+Build distributable binaries on Ubuntu 22.04 (or in a matching container), not on
+a newer developer workstation. The glibc check supplements the baseline runtime
+tests; it does not by itself verify GTK or other shared-library compatibility.

@@ -7,21 +7,23 @@ name: Create and Upload Release Artifact
 jobs:
   generate:
     name: Create release-artifacts
+    # Never raise the release glibc baseline by building on a newer runner.
     runs-on: ubuntu-22.04
     steps:
       - name: Get the release version
         id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
       - name: Install Linux build deps
-        run: sudo apt install libdbus-1-dev libgtk-4-dev
+        run: sudo apt update && sudo apt install -y libdbus-1-dev libgtk-4-dev binutils python3
       - name: Build and Package Release
         run: |
           cargo build --locked --release
+          /usr/bin/python3 tests/check_glibc.py target/release/meeters --max-version 2.35
           cp assets/* target/release/
           tar -zcf meeters-${{ steps.get_version.outputs.VERSION }}-linux-x86.tar.gz -C target/release meeters meeters-appindicator.png meeters-appindicator-error.png meeters-appindicator-nomeetingsleft.png meeters-appindicator-somemeetingsleft.png
       - name: Upload the artifacts

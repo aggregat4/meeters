@@ -4,7 +4,7 @@ description = "Small Linux app indicator that will show meeting notifications an
 version = "1.7.0"
 authors = ["Boris Terzic <boris@terzic.be>"]
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.92"
 repository = "https://github.com/aggregat4/meeters/"
 homepage = "https://github.com/aggregat4/meeters/"
 license = "Apache-2.0"
@@ -20,8 +20,9 @@ dbus-crossroads = "0.5"
 directories = "6.0"
 dotenvy = "0.15"
 either = "1.8"
-glib = "0.21"
-gtk = { package = "gtk4", version = "0.10.3" }
+glib = "0.22.9"
+# Keep newer GTK API features disabled: release binaries must support Ubuntu 22.04.
+gtk = { package = "gtk4", version = "0.11.4" }
 ical = "0.11"
 lazy_static = "1.4"
 ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
