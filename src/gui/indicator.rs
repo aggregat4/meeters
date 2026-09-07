@@ -1,213 +1,221 @@
 use crate::config::get_config_directory;
 use crate::domain::{Event, RefreshState, ResponseStatus, ONLINE_MEETING_MARKER};
 use crate::gui::actions::open_meeting;
-use crate::gui::refresh_log::{refresh_status_menu_label, show_refresh_log_dialog};
-use crate::gui::window::WindowManager;
+use crate::gui::refresh_log::refresh_status_menu_label;
+use async_channel::{Receiver, Sender};
 use chrono::prelude::*;
-use gtk::prelude::*;
-use gtk::Menu;
-use libappindicator::{AppIndicator, AppIndicatorStatus};
+use ksni::blocking::TrayMethods;
+use ksni::menu::StandardItem;
 use notify_rust::{Notification, Timeout};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 use std::thread;
 
-fn has_icons(dir: &Path) -> bool {
-    let normal_icon_path = dir.with_file_name("meeters-appindicator.png");
-    let error_icon_path = dir.with_file_name("meeters-appindicator-error.png");
-    normal_icon_path.exists() && error_icon_path.exists()
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayAction {
+    OpenMeeting(String),
+    ShowWindow,
+    ShowRefreshLog,
+    Quit,
 }
 
-fn find_icon_path() -> Option<PathBuf> {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if has_icons(&exe_path) {
-            return Some(exe_path);
+pub struct MeetingTray {
+    events: Vec<Event>,
+    refresh_status: String,
+    icon_name: String,
+    icon_theme_path: String,
+    sender: Sender<TrayAction>,
+}
+
+impl MeetingTray {
+    fn dispatch(&self, action: TrayAction) {
+        if let Err(error) = self.sender.try_send(action) {
+            log::warn!("could not dispatch tray action: {}", error);
         }
     }
-    let config_dir = get_config_directory();
-    if has_icons(&config_dir) {
-        return Some(config_dir);
-    }
-    None
 }
 
-fn set_error_icon(indicator: &mut AppIndicator) {
-    if let Some(icon_path) = find_icon_path() {
-        indicator.set_icon(
-            icon_path
-                .with_file_name("meeters-appindicator-error.png")
-                .to_str()
-                .unwrap(),
+impl ksni::Tray for MeetingTray {
+    const MENU_ON_ACTIVATE: bool = true;
+    fn id(&self) -> String {
+        "meeters".into()
+    }
+    fn title(&self) -> String {
+        "Meeters".into()
+    }
+    fn icon_name(&self) -> String {
+        self.icon_name.clone()
+    }
+    fn icon_theme_path(&self) -> String {
+        self.icon_theme_path.clone()
+    }
+    fn watcher_offline(&self, reason: ksni::OfflineReason) -> bool {
+        log::warn!(
+            "desktop tray unavailable: {:?}; waiting for a tray host",
+            reason
         );
+        true
     }
-}
-
-fn set_some_meetings_left_icon(indicator: &mut AppIndicator) {
-    if let Some(icon_path) = find_icon_path() {
-        indicator.set_icon(
-            get_icon_path_with_fallback(
-                icon_path,
-                "meeters-appindicator-somemeetingsleft.png".to_string(),
-            )
-            .to_str()
-            .unwrap(),
-        );
-    }
-}
-
-fn set_no_meetings_left_icon(indicator: &mut AppIndicator) {
-    if let Some(icon_path) = find_icon_path() {
-        indicator.set_icon(
-            get_icon_path_with_fallback(
-                icon_path,
-                "meeters-appindicator-nomeetingsleft.png".to_string(),
-            )
-            .to_str()
-            .unwrap(),
-        );
-    }
-}
-
-fn get_icon_path_with_fallback(icon_path: PathBuf, icon_filename: String) -> PathBuf {
-    let nomeetingsleft_icon_path = icon_path.with_file_name(icon_filename);
-    if !nomeetingsleft_icon_path.exists() {
-        icon_path.with_file_name("meeters-appindicator.png")
-    } else {
-        nomeetingsleft_icon_path
-    }
-}
-
-pub fn create_indicator() -> AppIndicator {
-    let mut indicator = AppIndicator::new("meeters", "");
-    indicator.set_status(AppIndicatorStatus::Active);
-    match find_icon_path() {
-        Some(icon_path) => {
-            indicator.set_icon(
-                icon_path
-                    .with_file_name("meeters-appindicator.png")
-                    .to_str()
-                    .unwrap(),
+    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+        let mut items = Vec::new();
+        if self.events.is_empty() {
+            items.push(
+                StandardItem {
+                    label: "No Events Today".into(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
             );
-            indicator
         }
-        None => {
-            indicator.set_icon_full("x-office-calendar", "icon");
-            indicator
+        for event in &self.events {
+            let url = event.meeturl.clone();
+            items.push(
+                StandardItem {
+                    label: event_menu_label(event, Local::now()),
+                    enabled: url.is_some(),
+                    activate: Box::new(move |tray: &mut Self| {
+                        if let Some(url) = &url {
+                            tray.dispatch(TrayAction::OpenMeeting(url.clone()));
+                        }
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
         }
-    }
-}
-
-pub fn create_indicator_menu(
-    today_events: &[Event],
-    indicator: &mut AppIndicator,
-    window_manager: Arc<Mutex<WindowManager>>,
-) {
-    let mut m: Menu = gtk::Menu::new();
-    let mut nof_upcoming_meetings = 0;
-    let refresh_state = {
-        let wm = window_manager.lock().unwrap();
-        wm.refresh_state_snapshot()
-    };
-
-    if today_events.is_empty() {
-        let item = gtk::MenuItem::with_label("test");
-        let label = item.child().unwrap();
-        (label.downcast::<gtk::Label>())
-            .unwrap()
-            .set_markup("<b>No Events Today</b>");
-        m.append(&item);
-    } else {
-        for event in today_events {
-            let all_day = event.start_timestamp.time() == event.end_timestamp.time();
-            let time_string = if all_day {
-                "All Day".to_owned()
-            } else {
-                format!(
-                    "{} - {}",
-                    &event.start_timestamp.format("%H:%M"),
-                    &event.end_timestamp.format("%H:%M")
-                )
-                .to_owned()
-            };
-            let meeturl_string = match &event.meeturl {
-                Some(_) => ONLINE_MEETING_MARKER,
-                None => "",
-            };
-
-            let item = gtk::MenuItem::with_label("Test");
-            let label = item.child().unwrap().downcast::<gtk::Label>().unwrap();
-            let now = Local::now();
-            let label_string = if all_day {
-                format!("{}: {}{}", time_string, &event.summary, meeturl_string)
-            } else if now < event.start_timestamp {
-                nof_upcoming_meetings += 1;
-                format!("◦ {}: {}{}", time_string, &event.summary, meeturl_string)
-            } else if now >= event.start_timestamp && now <= event.end_timestamp {
-                nof_upcoming_meetings += 1;
-                format!("• {}: {}{}", time_string, &event.summary, meeturl_string)
-            } else {
-                format!("✓ {}: {}{}", time_string, &event.summary, meeturl_string)
-            };
-
-            label.set_text(&label_string);
-            let new_event = (*event).clone();
-            if new_event.meeturl.is_some() {
-                item.connect_activate(move |_| {
-                    let meet_url = &new_event.meeturl.as_ref().unwrap();
-                    open_meeting(meet_url);
-                });
+        items.push(ksni::MenuItem::Separator);
+        items.push(
+            StandardItem {
+                label: self.refresh_status.clone(),
+                activate: Box::new(|tray: &mut Self| tray.dispatch(TrayAction::ShowRefreshLog)),
+                ..Default::default()
             }
-            m.append(&item);
-        }
+            .into(),
+        );
+        items.push(
+            StandardItem {
+                label: "Show Meetings Window".into(),
+                activate: Box::new(|tray: &mut Self| tray.dispatch(TrayAction::ShowWindow)),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items.push(ksni::MenuItem::Separator);
+        items.push(
+            StandardItem {
+                label: "Quit".into(),
+                activate: Box::new(|tray: &mut Self| tray.dispatch(TrayAction::Quit)),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items
     }
-
-    let refresh_status_item = gtk::MenuItem::with_label(&refresh_status_menu_label(&refresh_state));
-    let log_window_manager = Arc::clone(&window_manager);
-    refresh_status_item.connect_activate(move |_| {
-        let (parent, refresh_state) = {
-            let wm = log_window_manager.lock().unwrap();
-            wm.refresh_log_dialog_data()
-        };
-        show_refresh_log_dialog(parent.as_ref(), &refresh_state);
-    });
-    m.append(&gtk::SeparatorMenuItem::new());
-    m.append(&refresh_status_item);
-
-    let show_window_item = gtk::MenuItem::with_label("Show Meetings Window");
-    let window_manager_clone = Arc::clone(&window_manager);
-    show_window_item.connect_activate(move |_| {
-        let mut wm = window_manager_clone.lock().unwrap();
-        wm.show_window();
-    });
-    m.append(&gtk::SeparatorMenuItem::new());
-    m.append(&show_window_item);
-
-    let mi = gtk::MenuItem::with_label("Quit");
-    mi.connect_activate(|_| {
-        gtk::main_quit();
-    });
-    m.append(&gtk::SeparatorMenuItem::new());
-    m.append(&mi);
-    m.show_all();
-    set_icon_for_refresh_state(&refresh_state, nof_upcoming_meetings, indicator);
-    indicator.set_menu(&mut m);
 }
 
-fn set_icon_for_refresh_state(
-    refresh_state: &RefreshState,
-    nof_upcoming_meetings: i32,
-    indicator: &mut AppIndicator,
-) {
-    if refresh_state.last_update_successful == Some(false) {
-        log::warn!("calendar refresh failed");
-        set_error_icon(indicator);
-    } else if nof_upcoming_meetings > 0 {
-        log::debug!("some meetings upcoming");
-        set_some_meetings_left_icon(indicator);
+fn event_menu_label(event: &Event, now: DateTime<Local>) -> String {
+    let time = if event.all_day {
+        "All Day".to_string()
     } else {
-        log::debug!("no meetings upcoming");
-        set_no_meetings_left_icon(indicator);
+        format!(
+            "{} - {}",
+            event.start_timestamp.format("%H:%M"),
+            event.end_timestamp.format("%H:%M")
+        )
+    };
+    let prefix = if event.all_day {
+        ""
+    } else if now < event.start_timestamp {
+        "◦ "
+    } else if now <= event.end_timestamp {
+        "• "
+    } else {
+        "✓ "
+    };
+    let marker = if event.meeturl.is_some() {
+        ONLINE_MEETING_MARKER
+    } else {
+        ""
+    };
+    // DBusMenu uses underscores as mnemonic markers. Escape literal underscores.
+    format!("{}{}: {}{}", prefix, time, event.summary, marker).replace('_', "__")
+}
+
+fn find_icon_directory() -> Option<PathBuf> {
+    let mut directories = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            directories.push(parent.to_path_buf());
+        }
     }
+    directories.push(get_config_directory());
+    directories
+        .into_iter()
+        .find(|dir| dir.join("meeters-appindicator.png").is_file())
+}
+
+pub struct Indicator {
+    handle: ksni::blocking::Handle<MeetingTray>,
+    icon_directory: Option<PathBuf>,
+}
+
+impl Drop for Indicator {
+    fn drop(&mut self) {
+        self.handle.shutdown();
+    }
+}
+
+pub fn create_indicator() -> Result<(Indicator, Receiver<TrayAction>), ksni::Error> {
+    let (sender, receiver) = async_channel::unbounded();
+    let icon_directory = find_icon_directory();
+    let tray = MeetingTray {
+        events: Vec::new(),
+        refresh_status: "Calendar not refreshed yet".into(),
+        icon_name: if icon_directory.is_some() {
+            "meeters-appindicator"
+        } else {
+            "x-office-calendar"
+        }
+        .into(),
+        icon_theme_path: icon_directory
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        sender,
+    };
+    // Keep serving if the desktop tray host is temporarily absent or restarts.
+    let handle = tray.assume_sni_available(true).spawn()?;
+    Ok((
+        Indicator {
+            handle,
+            icon_directory,
+        },
+        receiver,
+    ))
+}
+
+pub fn create_indicator_menu(events: &[Event], indicator: &Indicator, state: &RefreshState) {
+    let now = Local::now();
+    let icon = if state.last_update_successful == Some(false) {
+        "meeters-appindicator-error"
+    } else if events
+        .iter()
+        .any(|event| !event.all_day && event.end_timestamp >= now)
+    {
+        "meeters-appindicator-somemeetingsleft"
+    } else {
+        "meeters-appindicator-nomeetingsleft"
+    };
+    let icon = match &indicator.icon_directory {
+        Some(dir) if dir.join(format!("{}.png", icon)).is_file() => icon,
+        Some(_) => "meeters-appindicator",
+        None => "x-office-calendar",
+    };
+    indicator.handle.update(|tray| {
+        tray.events = events.to_vec();
+        tray.refresh_status = refresh_status_menu_label(state);
+        tray.icon_name = icon.into();
+    });
 }
 
 pub fn show_event_notification(event: Event) {

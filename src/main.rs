@@ -104,6 +104,17 @@ fn events_to_notify<'a>(
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     logging::init_from_env();
 
+    // Keep the existing public net.aggregat4.Meeters D-Bus service separate
+    // from GApplication's single-instance registration.
+    let application = gtk::Application::builder()
+        .application_id("net.aggregat4.Meeters.Application")
+        .build();
+    application.register(None::<&gtk::gio::Cancellable>)?;
+    if application.is_remote() {
+        application.activate();
+        return Ok(());
+    }
+
     let config = Config::load()?;
     log::info!("local timezone configured as {}", config.local_tz_iana);
 
@@ -122,18 +133,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )));
 
     // Initialize GUI components
-    let (mut indicator, window_manager, dbus_receiver) = gui::initialize_gui(
+    let (indicator, window_manager, dbus_receiver) = gui::initialize_gui(
+        &application,
         config.start_hour,
         config.end_hour,
         config.future_days,
         Arc::clone(&refresh_state),
-    );
+    )?;
 
     // Create a message passing channel so we can communicate safely with the main GUI thread from our worker thread
     let (events_sender, events_receiver) = async_channel::bounded::<CalendarMessages>(10);
     let (password_prompt_sender, password_prompt_receiver) =
         async_channel::bounded::<calendar_source::EwsPasswordPrompt>(1);
-    let window_manager_clone = Arc::clone(&window_manager);
+    let window_manager_clone = std::rc::Rc::clone(&window_manager);
 
     glib::MainContext::default().spawn_local(async move {
         while let Ok(event_message) = events_receiver.recv().await {
@@ -141,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 DayEvents(day_events) => {
                     // Update window manager with new events
                     {
-                        let mut wm = window_manager_clone.lock().unwrap();
+                        let mut wm = window_manager_clone.borrow_mut();
                         wm.update_events(day_events.clone());
                     }
 
@@ -150,8 +162,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let today_events = day_events.first().unwrap_or(&empty_events);
                     gui::create_indicator_menu(
                         today_events,
-                        &mut indicator,
-                        Arc::clone(&window_manager_clone),
+                        &indicator,
+                        &window_manager_clone.borrow().refresh_state_snapshot(),
                     );
                 }
                 EventNotification(event) => {
@@ -161,13 +173,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 RefreshStateChanged => {
                     let today_events = {
-                        let wm = window_manager_clone.lock().unwrap();
+                        let wm = window_manager_clone.borrow();
                         wm.today_events()
                     };
                     gui::create_indicator_menu(
                         &today_events,
-                        &mut indicator,
-                        Arc::clone(&window_manager_clone),
+                        &indicator,
+                        &window_manager_clone.borrow().refresh_state_snapshot(),
                     );
                 }
             }
@@ -175,19 +187,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::warn!("calendar GUI message channel closed");
     });
 
-    let window_manager_clone = Arc::clone(&window_manager);
+    let window_manager_clone = std::rc::Rc::clone(&window_manager);
+    let prompt_application = application.clone();
     glib::MainContext::default().spawn_local(async move {
         while let Ok(prompt) = password_prompt_receiver.recv().await {
             let parent = {
-                let wm = window_manager_clone.lock().unwrap();
+                let wm = window_manager_clone.borrow();
                 wm.current_window.clone()
             };
             let password = gui::show_ews_password_dialog(
+                &prompt_application,
                 parent.as_ref(),
                 &prompt.endpoint,
                 &prompt.user,
                 prompt.replacing_existing_password,
-            );
+            )
+            .await;
             if let Err(e) = prompt.response_sender.send(password) {
                 log::warn!("could not return EWS password prompt result: {}", e);
             }
@@ -196,11 +211,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Handle D-Bus requests in the main GTK thread
-    let window_manager_clone = Arc::clone(&window_manager);
+    let window_manager_clone = std::rc::Rc::clone(&window_manager);
 
     glib::MainContext::default().spawn_local(async move {
         while let Ok((action, _)) = dbus_receiver.recv().await {
-            let mut wm = window_manager_clone.lock().unwrap();
+            let mut wm = window_manager_clone.borrow_mut();
             match action.as_str() {
                 "show" => wm.show_window(),
                 "close" => {
@@ -341,7 +356,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Run the GUI main loop
-    gui::run_gui_main_loop();
+    gui::run_gui_main_loop(&application);
     Ok(())
 }
 

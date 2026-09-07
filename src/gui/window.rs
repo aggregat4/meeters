@@ -11,7 +11,8 @@ fn calculate_window_height(start_hour: i32, end_hour: i32) -> i32 {
 
 pub struct WindowManager {
     pub current_window: Option<gtk::Window>,
-    day_events: Arc<Mutex<Vec<Vec<Event>>>>,
+    day_events: Vec<Vec<Event>>,
+    application: gtk::Application,
     refresh_state: Arc<Mutex<RefreshState>>,
     start_hour: i32,
     end_hour: i32,
@@ -20,6 +21,7 @@ pub struct WindowManager {
 
 impl WindowManager {
     pub fn new(
+        application: &gtk::Application,
         start_hour: i32,
         end_hour: i32,
         future_days: i32,
@@ -27,7 +29,8 @@ impl WindowManager {
     ) -> Self {
         WindowManager {
             current_window: None,
-            day_events: Arc::new(Mutex::new(Vec::new())),
+            day_events: Vec::new(),
+            application: application.clone(),
             refresh_state,
             start_hour,
             end_hour,
@@ -68,7 +71,7 @@ impl WindowManager {
         day_label.set_markup(&format!("<b>{}</b>", label_text));
         style_label_with_css(&day_label, TEXT_PRIMARY, "font-size: 15px;");
 
-        day_box.pack_start(&day_label, false, false, 0);
+        day_box.append(&day_label);
 
         let timeline = TimelineView::new(
             events.to_vec(),
@@ -76,38 +79,41 @@ impl WindowManager {
             self.end_hour,
             day_index == 0,
         );
-        day_box.pack_start(&timeline.container, true, true, 0);
+        timeline.container.set_hexpand(true);
+        timeline.container.set_vexpand(true);
+        day_box.append(&timeline.container);
 
         day_box
     }
 
     fn build_days_view(&self, day_events: &[Vec<Event>]) -> gtk::ScrolledWindow {
-        let scrolled_window =
-            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        let scrolled_window = gtk::ScrolledWindow::new();
         scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
 
         let days_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         for (day_index, events) in day_events.iter().enumerate() {
             let day_box = self.build_day_box(day_index, events);
-            days_box.pack_start(&day_box, true, true, 0);
+            day_box.set_hexpand(true);
+            day_box.set_vexpand(true);
+            days_box.append(&day_box);
         }
 
-        scrolled_window.add(&days_box);
+        scrolled_window.set_child(Some(&days_box));
         scrolled_window
     }
 
     pub fn show_window(&mut self) {
-        let day_events = self.day_events.lock().unwrap();
+        let day_events = &self.day_events;
 
         if let Some(window) = &self.current_window {
-            if window.is_visible() {
-                window.present();
-                return;
-            }
+            window.present();
+            return;
         }
 
-        let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Calendar View");
+        let window = gtk::Window::builder()
+            .application(&self.application)
+            .build();
+        window.set_title(Some("Calendar View"));
         window.set_default_size(
             DAY_MIN_WIDTH * (self.future_days + 1),
             calculate_window_height(self.start_hour, self.end_hour),
@@ -119,46 +125,37 @@ impl WindowManager {
         main_box.set_margin_top(6);
         main_box.set_margin_bottom(6);
 
-        let scrolled_window = self.build_days_view(&day_events);
-        main_box.pack_start(&scrolled_window, true, true, 0);
-        window.add(&main_box);
+        let scrolled_window = self.build_days_view(day_events);
+        scrolled_window.set_hexpand(true);
+        scrolled_window.set_vexpand(true);
+        main_box.append(&scrolled_window);
+        window.set_child(Some(&main_box));
 
-        let window_clone = window.clone();
-        window.connect_delete_event(move |_, _| {
-            window_clone.hide();
+        window.connect_close_request(move |window| {
+            window.hide();
             glib::Propagation::Stop
         });
 
-        window.show_all();
+        window.present();
         self.current_window = Some(window);
     }
 
     pub fn update_events(&mut self, new_events: Vec<Vec<Event>>) {
-        let mut events = self.day_events.lock().unwrap();
-        *events = new_events;
-
+        self.day_events = new_events;
         if let Some(window) = &self.current_window {
-            if let Some(main_box) = window.children().first() {
-                let main_box = main_box.clone().downcast::<gtk::Box>().unwrap();
-                main_box
-                    .children()
-                    .iter()
-                    .for_each(|child| main_box.remove(child));
-
-                let scrolled_window = self.build_days_view(&events);
-                main_box.pack_start(&scrolled_window, true, true, 0);
-                main_box.show_all();
+            if let Some(main_box) = window.child().and_downcast::<gtk::Box>() {
+                while let Some(child) = main_box.first_child() {
+                    main_box.remove(&child);
+                }
+                let scrolled_window = self.build_days_view(&self.day_events);
+                scrolled_window.set_vexpand(true);
+                main_box.append(&scrolled_window);
             }
         }
     }
 
     pub fn today_events(&self) -> Vec<Event> {
-        self.day_events
-            .lock()
-            .unwrap()
-            .first()
-            .cloned()
-            .unwrap_or_default()
+        self.day_events.first().cloned().unwrap_or_default()
     }
 
     pub fn refresh_state_snapshot(&self) -> RefreshState {

@@ -1,6 +1,7 @@
 pub fn open_meeting(meet_url: &str) {
-    match gtk::show_uri_on_window(None::<&gtk::Window>, meet_url, gtk::current_event_time()) {
-        Ok(_) => (),
-        Err(e) => log::error!("error trying to open the meeting URL: {}", e),
+    if let Err(error) =
+        gtk::gio::AppInfo::launch_default_for_uri(meet_url, None::<&gtk::gio::AppLaunchContext>)
+    {
+        log::error!("error trying to open the meeting URL: {}", error);
     }
 }

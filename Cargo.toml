@@ -4,6 +4,7 @@ description = "Small Linux app indicator that will show meeting notifications an
 version = "1.7.0"
 authors = ["Boris Terzic <boris@terzic.be>"]
 edition = "2021"
+rust-version = "1.88"
 repository = "https://github.com/aggregat4/meeters/"
 homepage = "https://github.com/aggregat4/meeters/"
 license = "Apache-2.0"
@@ -19,11 +20,11 @@ dbus-crossroads = "0.5"
 directories = "6.0"
 dotenvy = "0.15"
 either = "1.8"
-glib = "0.18"
-gtk = "0.18"
+glib = "0.21"
+gtk = { package = "gtk4", version = "0.10.3" }
 ical = "0.11"
 lazy_static = "1.4"
-libappindicator = "0.9"
+ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
 log = "0.4"
 maplit = "1.0"
 multimap = "0.10"

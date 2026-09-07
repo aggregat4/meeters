@@ -41,7 +41,7 @@ pub fn event_palette(event: &Event) -> EventPalette {
 
 pub fn load_css(style_context: &gtk::StyleContext, css: &str) {
     let provider = gtk::CssProvider::new();
-    provider.load_from_data(css.as_bytes()).unwrap();
+    provider.load_from_data(css);
     style_context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 

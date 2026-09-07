@@ -1,6 +1,7 @@
 use gtk::prelude::*;
 
-pub fn show_ews_password_dialog(
+pub async fn show_ews_password_dialog(
+    application: &gtk::Application,
     parent: Option<&gtk::Window>,
     endpoint: &str,
     user: &str,
@@ -32,6 +33,7 @@ pub fn show_ews_password_dialog(
             ("Save", gtk::ResponseType::Accept),
         ],
     );
+    dialog.set_application(Some(application));
     dialog.set_default_response(gtk::ResponseType::Accept);
 
     let content = dialog.content_area();
@@ -42,18 +44,18 @@ pub fn show_ews_password_dialog(
     content.set_margin_bottom(12);
 
     let label = gtk::Label::new(Some(&message));
-    label.set_line_wrap(true);
+    label.set_wrap(true);
     label.set_xalign(0.0);
-    content.pack_start(&label, false, false, 0);
+    content.append(&label);
 
     let password_entry = gtk::Entry::new();
     password_entry.set_visibility(false);
     password_entry.set_activates_default(true);
     password_entry.set_input_purpose(gtk::InputPurpose::Password);
-    content.pack_start(&password_entry, false, false, 0);
+    content.append(&password_entry);
 
-    dialog.show_all();
-    let response = dialog.run();
+    dialog.show();
+    let response = dialog.run_future().await;
     let password = if response == gtk::ResponseType::Accept {
         let password = password_entry.text().to_string();
         if password.is_empty() {

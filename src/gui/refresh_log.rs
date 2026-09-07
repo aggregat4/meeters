@@ -71,9 +71,14 @@ fn refresh_log_text(refresh_state: &RefreshState) -> String {
     lines.join("\n")
 }
 
-pub fn show_refresh_log_dialog(parent: Option<&gtk::Window>, refresh_state: &RefreshState) {
+pub fn show_refresh_log_dialog(
+    application: &gtk::Application,
+    parent: Option<&gtk::Window>,
+    refresh_state: &RefreshState,
+) {
     let dialog = gtk::Dialog::new();
-    dialog.set_title("Calendar Refresh Log");
+    dialog.set_application(Some(application));
+    dialog.set_title(Some("Calendar Refresh Log"));
     dialog.set_modal(true);
     if let Some(parent) = parent {
         dialog.set_transient_for(Some(parent));
@@ -82,8 +87,7 @@ pub fn show_refresh_log_dialog(parent: Option<&gtk::Window>, refresh_state: &Ref
     dialog.set_default_size(760, 420);
 
     let content_area = dialog.content_area();
-    let scrolled_window =
-        gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+    let scrolled_window = gtk::ScrolledWindow::new();
     scrolled_window.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     scrolled_window.set_hexpand(true);
     scrolled_window.set_vexpand(true);
@@ -95,14 +99,15 @@ pub fn show_refresh_log_dialog(parent: Option<&gtk::Window>, refresh_state: &Ref
     text_view.set_wrap_mode(gtk::WrapMode::WordChar);
     text_view
         .buffer()
-        .expect("TextView buffer must exist")
         .set_text(&refresh_log_text(refresh_state));
 
-    scrolled_window.add(&text_view);
-    content_area.pack_start(&scrolled_window, true, true, 0);
+    scrolled_window.set_child(Some(&text_view));
+    scrolled_window.set_hexpand(true);
+    scrolled_window.set_vexpand(true);
+    content_area.append(&scrolled_window);
 
     dialog.connect_response(|dialog, _| {
         dialog.close();
     });
-    dialog.show_all();
+    dialog.show();
 }

@@ -188,8 +188,8 @@ impl TimelineView {
         };
 
         let label = gtk::Label::new(Some(&text));
-        label.set_line_wrap(true);
-        label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+        label.set_wrap(true);
+        label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         label.set_justify(gtk::Justification::Left);
         label.set_xalign(0.0);
         label.set_margin_start(8);
@@ -197,7 +197,7 @@ impl TimelineView {
         label.set_margin_top(4);
         label.set_margin_bottom(4);
         style_label(&label, palette.text);
-        button.add(&label);
+        button.set_child(Some(&label));
 
         if let Some(meet_url) = &event.meeturl {
             let url = meet_url.clone();
@@ -228,7 +228,7 @@ impl TimelineView {
         all_day_label.set_margin_bottom(2);
         all_day_label.set_markup("All Day");
         style_label_with_css(&all_day_label, TEXT_SUBTLE, "font-size: 13px;");
-        all_day_container.pack_start(&all_day_label, false, false, 0);
+        all_day_container.append(&all_day_label);
 
         let all_day_events_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         all_day_events_box.set_size_request(-1, if all_day_events.is_empty() { 12 } else { 40 });
@@ -240,12 +240,13 @@ impl TimelineView {
 
             for event in all_day_events {
                 let button = Self::create_event_button(&event, button_width, 40, false);
-                all_day_events_box.pack_start(&button, true, true, 0);
+                button.set_hexpand(true);
+                all_day_events_box.append(&button);
             }
         }
 
-        all_day_container.pack_start(&all_day_events_box, false, false, 0);
-        container.pack_start(&all_day_container, false, false, 0);
+        all_day_container.append(&all_day_events_box);
+        container.append(&all_day_container);
 
         let time_label_width: i32 = 50;
         let spacing: i32 = 10;
@@ -271,7 +272,7 @@ impl TimelineView {
             TIMELINE_BACKGROUND
         );
         load_css(&background_box.style_context(), &css);
-        meeting_area.put(&background_box, 0, 0);
+        meeting_area.put(&background_box, 0.0, 0.0);
 
         let timeline_rail = gtk::Box::new(gtk::Orientation::Vertical, 0);
         timeline_rail.set_size_request(2, (end_hour - start_hour) * HOUR_HEIGHT);
@@ -282,7 +283,7 @@ impl TimelineView {
                 TIMELINE_RAIL
             ),
         );
-        meeting_area.put(&timeline_rail, 0, 0);
+        meeting_area.put(&timeline_rail, 0.0, 0.0);
 
         for hour in start_hour..=end_hour {
             let y_position = (hour - start_hour) * HOUR_HEIGHT;
@@ -291,7 +292,7 @@ impl TimelineView {
             label.set_xalign(1.0);
             label.set_margin_end(5);
             style_label_with_css(&label, TEXT_SUBTLE, "font-size: 13px;");
-            time_column.put(&label, 0, y_position);
+            time_column.put(&label, 0.0, f64::from(y_position));
 
             let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             separator.set_size_request(TIMELINE_MIN_WIDTH, -1);
@@ -309,7 +310,7 @@ impl TimelineView {
             };
 
             load_css(&separator.style_context(), &css);
-            meeting_area.put(&separator, 0, y_position);
+            meeting_area.put(&separator, 0.0, f64::from(y_position));
         }
 
         let mut event_groups: Vec<Vec<&Event>> = Vec::new();
@@ -342,7 +343,7 @@ impl TimelineView {
                 let x_position = spacing + (button_width + spacing) * index as i32;
 
                 let button = Self::create_event_button(event, button_width, height, true);
-                meeting_area.put(&button, x_position, y_position);
+                meeting_area.put(&button, f64::from(x_position), f64::from(y_position));
             }
         }
 
@@ -364,7 +365,7 @@ impl TimelineView {
                     ),
                 );
 
-                meeting_area.put(&current_time_marker, 0, y_position);
+                meeting_area.put(&current_time_marker, 0.0, f64::from(y_position));
 
                 let current_time_cap = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                 current_time_cap.set_size_request(8, 8);
@@ -375,17 +376,21 @@ impl TimelineView {
                         CURRENT_TIME_MARKER
                     ),
                 );
-                meeting_area.put(&current_time_cap, 0, y_position - 3);
+                meeting_area.put(&current_time_cap, 0.0, f64::from(y_position - 3));
             }
         }
 
         let total_height = (end_hour - start_hour) * HOUR_HEIGHT;
 
-        layout_box.pack_start(&time_column, false, false, 0);
-        layout_box.pack_start(&meeting_area, true, true, 0);
+        layout_box.append(&time_column);
+        meeting_area.set_hexpand(true);
+        meeting_area.set_vexpand(true);
+        layout_box.append(&meeting_area);
         layout_box.set_size_request(-1, total_height);
 
-        container.pack_start(&layout_box, true, true, 0);
+        layout_box.set_hexpand(true);
+        layout_box.set_vexpand(true);
+        container.append(&layout_box);
 
         Self { container }
     }
