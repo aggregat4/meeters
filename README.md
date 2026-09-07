@@ -1,13 +1,18 @@
-This is a graphical (GTK) utility for Linux that lives in the tray as an app indicator, watches a configured ical calendar file URL and will notify shortly before a meeting begins. It allows you to directly open any (Zoom) embedded meeting URL with a single click from either the popup menu or the notification.
+This is a graphical (GTK4) utility for Linux that lives in the tray as an app indicator, watches a configured ical calendar file URL and will notify shortly before a meeting begins. It allows you to directly open any (Zoom) embedded meeting URL with a single click from either the popup menu or the notification.
 
 # Building
 
+Requires Rust 1.88 or newer, GTK4 development libraries, and D-Bus development libraries.
+On Ubuntu/Debian, install them with `sudo apt install libgtk-4-dev libdbus-1-dev`.
+
 1. Clone repo
-1. `cargo b`
+1. `cargo build --locked`
 
 # Installation
 
-You can drop the meeters binary anywhere. The tarball includes a few (optional) icons that will be used when they are located next to the meeters binary. If not the program will default to a "new appointment" icon.
+You can drop the meeters binary anywhere. The desktop must provide a StatusNotifierItem tray host (for example, KDE Plasma’s tray or GNOME Shell with an AppIndicator/StatusNotifierItem extension). GTK3 and libappindicator are no longer required.
+
+The tarball includes a few (optional) icons that will be used when they are located next to the meeters binary. If not the program will default to a "new appointment" icon.
 
 # Configuration
 
@@ -98,4 +103,25 @@ dbus-send --session --dest=net.aggregat4.Meeters --type=method_call /net/aggrega
 
 | Error | Solution |
 |-------|----------|
-| `thread 'main' panicked at 'Failed to load ayatana-appindicator3 or appindicator3 dynamic library'` | Install the required appindicator library. On Arch Linux, run: `sudo pacman -S libappindicator-gtk3` |
+| Tray icon does not appear | Enable a StatusNotifierItem-compatible tray host or extension. Meeters waits for the tray host to become available. Launching Meeters again shows the existing calendar window; Ctrl+Q quits the application. |
+
+# Desktop migration tests
+
+The GTK4 migration keeps the existing D-Bus control interface and uses a separate
+`net.aggregat4.Meeters.Application` ID for single-instance application activation.
+Closing the calendar hides it; the application continues polling in the tray.
+
+The isolated smoke tests require `xvfb`, `xauth`, `xdotool`, `dbus-x11`,
+`python3-dbus`, and `python3-gi` on Ubuntu/Debian:
+
+```bash
+cargo build --locked
+cargo test --locked
+dbus-run-session -- xvfb-run -a python3 tests/desktop_smoke.py target/debug/meeters
+GTK_A11Y=none GSK_RENDERER=cairo dbus-run-session -- xvfb-run -a cargo test --locked gtk4_window_and_password_dialogs -- --ignored --test-threads=1
+```
+
+The smoke test provides its own calendar and tray host. It does not use your
+calendar configuration or keyring. Before releasing, also check tray icon rendering,
+notification links, password storage, and window presentation on the target desktop,
+including Wayland where supported.
