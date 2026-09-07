@@ -22,8 +22,12 @@ jobs:
         toolchain: stable
     - uses: Swatinem/rust-cache@v1
     - name: Install Linux build deps
-      run: sudo apt update && sudo apt install -y libdbus-1-dev libgtk-4-dev
+      run: sudo apt update && sudo apt install -y libdbus-1-dev libgtk-4-dev xvfb xauth xdotool dbus-x11 python3-dbus python3-gi
     - name: Build
       run: cargo build --locked --verbose
     - name: Run tests
       run: cargo test --locked --verbose
+    - name: Desktop smoke tests
+      run: |
+        dbus-run-session -- xvfb-run -a python3 tests/desktop_smoke.py target/debug/meeters
+        GTK_A11Y=none GSK_RENDERER=cairo dbus-run-session -- xvfb-run -a cargo test --locked gtk4_window_and_password_dialogs -- --ignored --test-threads=1
