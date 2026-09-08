@@ -1,11 +1,10 @@
 use std::time::Duration;
 
+use base64::prelude::*;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use reqwest::blocking::{Client, Response};
-use reqwest::header::CONTENT_TYPE;
-use reqwest::redirect::Policy;
 use roxmltree::{Document, Node};
+use ureq::Agent;
 
 use crate::domain::{Event, EventMetadata, Participant, ResponseStatus};
 use crate::meeters_ical::{convert_to_zoommtg, parse_zoom_url};
@@ -49,6 +48,7 @@ impl EventDetails {
 }
 
 pub fn fetch_events(
+    agent: &Agent,
     config: &EwsConfig,
     password: &str,
     local_tz: &Tz,
@@ -57,6 +57,7 @@ pub fn fetch_events(
     use_zoommtg: bool,
 ) -> Result<Vec<Event>, EwsError> {
     let find_response = post_soap(
+        agent,
         config,
         password,
         &find_item_request(start_time, end_time),
@@ -68,6 +69,7 @@ pub fn fetch_events(
     }
 
     let body_response = post_soap(
+        agent,
         config,
         password,
         &get_item_request(&summaries),
@@ -108,62 +110,51 @@ pub fn fetch_events(
         .collect()
 }
 
+pub(crate) fn http_agent(timeout: Duration) -> Agent {
+    Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
 fn post_soap(
+    agent: &Agent,
     config: &EwsConfig,
     password: &str,
     soap: &str,
     soap_action: &str,
 ) -> Result<String, EwsError> {
-    let client = Client::builder()
-        .http1_only()
-        .redirect(Policy::none())
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| EwsError::Other(format!("Could not build EWS HTTP client: {}", e)))?;
-    let response = send_ews_post(
-        &client,
-        &config.url,
-        &config.user,
-        password,
-        soap,
-        soap_action,
-    )?;
+    let authorization = format!(
+        "Basic {}",
+        BASE64_STANDARD.encode(format!("{}:{}", config.user, password))
+    );
+    let mut response = agent
+        .post(&config.url)
+        .header("Authorization", &authorization)
+        .header("Content-Type", "text/xml; charset=utf-8")
+        .header("SOAPAction", format!("\"{}\"", soap_action))
+        .send(soap)
+        .map_err(|e| EwsError::Other(format!("Error calling EWS endpoint: {}", e)))?;
     let status = response.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(EwsError::AuthFailed);
     }
-    response_to_text(response)
-}
-
-fn send_ews_post(
-    client: &Client,
-    url: &str,
-    user: &str,
-    password: &str,
-    soap: &str,
-    soap_action: &str,
-) -> Result<Response, EwsError> {
-    client
-        .post(url)
-        .basic_auth(user, Some(password))
-        .header(CONTENT_TYPE, "text/xml; charset=utf-8")
-        .header("SOAPAction", format!("\"{}\"", soap_action))
-        .body(soap.to_string())
-        .send()
-        .map_err(|e| EwsError::Other(format!("Error calling EWS endpoint: {}", e)))
-}
-
-fn response_to_text(response: Response) -> Result<String, EwsError> {
-    let status = response.status();
     if !status.is_success() {
         return Err(EwsError::Other(format!(
             "EWS returned HTTP status {}",
             status.as_u16()
         )));
     }
-    response
-        .text()
-        .map_err(|e| EwsError::Other(format!("Could not read EWS response body: {}", e)))
+    // Match Reqwest's previous unlimited, lossy UTF-8 decoding. Ureq's
+    // convenience string reader otherwise introduces a 10 MiB response limit.
+    let bytes = response
+        .body_mut()
+        .with_config()
+        .read_to_vec()
+        .map_err(|e| EwsError::Other(format!("Could not read EWS response body: {}", e)))?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn find_item_request(start_time: DateTime<Tz>, end_time: DateTime<Tz>) -> String {
@@ -450,6 +441,160 @@ fn strip_html_tags(value: &str) -> String {
 mod tests {
     use super::*;
     use chrono::Timelike;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn read_request(stream: &mut BufReader<std::net::TcpStream>) -> String {
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert!(stream.read_line(&mut line).unwrap() > 0);
+            headers.push_str(&line);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .unwrap_or(0);
+        let mut body = vec![0; length];
+        stream.read_exact(&mut body).unwrap();
+        headers + &String::from_utf8(body).unwrap()
+    }
+
+    #[test]
+    fn soap_reuses_connection_and_sends_current_credentials() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let config = EwsConfig {
+            url: format!("http://{}/ews", listener.local_addr().unwrap()),
+            user: "user".into(),
+        };
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut stream = BufReader::new(stream);
+            for password in ["first", "second"] {
+                let request = read_request(&mut stream);
+                let headers = request.to_ascii_lowercase();
+                assert!(request.starts_with("POST /ews HTTP/1.1\r\n"));
+                assert!(headers.contains("content-type: text/xml; charset=utf-8\r\n"));
+                assert!(headers.contains("soapaction: \"action\"\r\n"));
+                assert!(request.contains(&format!(
+                    "Basic {}",
+                    BASE64_STANDARD.encode(format!("user:{password}"))
+                )));
+                assert!(request.ends_with("<soap/>"));
+                stream
+                    .get_mut()
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                    .unwrap();
+            }
+        });
+        let agent = http_agent(Duration::from_secs(2));
+        for password in ["first", "second"] {
+            assert_eq!(
+                post_soap(&agent.clone(), &config, password, "<soap/>", "action").unwrap(),
+                "ok"
+            );
+        }
+        server.join().unwrap();
+    }
+
+    fn serve_response(
+        status: u16,
+        body: Vec<u8>,
+        delay: Duration,
+    ) -> (EwsConfig, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/ews", listener.local_addr().unwrap());
+        let redirect = format!("{url}/redirect");
+        let handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut stream = BufReader::new(stream);
+            read_request(&mut stream);
+            thread::sleep(delay);
+            let headers = format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nLocation: {redirect}\r\nConnection: close\r\n\r\n", body.len());
+            let _ = stream.get_mut().write_all(headers.as_bytes());
+            let _ = stream.get_mut().write_all(&body);
+        });
+        (
+            EwsConfig {
+                url,
+                user: "user".into(),
+            },
+            handle,
+        )
+    }
+
+    #[test]
+    fn soap_preserves_auth_errors_and_rejects_redirects_and_server_errors() {
+        for status in [401, 403, 302, 500] {
+            let (config, server) = serve_response(status, vec![], Duration::ZERO);
+            let error = post_soap(
+                &http_agent(Duration::from_secs(2)),
+                &config,
+                "password",
+                "body",
+                "action",
+            )
+            .unwrap_err();
+            match error {
+                EwsError::AuthFailed => assert!([401, 403].contains(&status)),
+                EwsError::Other(message) => {
+                    assert_eq!(message, format!("EWS returned HTTP status {status}"))
+                }
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn soap_preserves_large_responses_and_lossy_utf8() {
+        let mut body = vec![b'a'; 10 * 1024 * 1024 + 1];
+        body.push(0xff);
+        let expected = String::from_utf8_lossy(&body).into_owned();
+        let (config, server) = serve_response(200, body, Duration::ZERO);
+        assert_eq!(
+            post_soap(
+                &http_agent(Duration::from_secs(5)),
+                &config,
+                "password",
+                "body",
+                "action"
+            )
+            .unwrap(),
+            expected
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn soap_times_out_waiting_for_response() {
+        let (config, server) = serve_response(200, vec![], Duration::from_millis(250));
+        let error = post_soap(
+            &http_agent(Duration::from_millis(50)),
+            &config,
+            "password",
+            "body",
+            "action",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, EwsError::Other(message) if message.starts_with("Error calling EWS endpoint:"))
+        );
+        server.join().unwrap();
+    }
 
     #[test]
     fn parses_calendar_item_summary() {

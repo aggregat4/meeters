@@ -22,6 +22,7 @@ pub struct EwsPasswordPrompt {
 #[derive(Clone)]
 pub struct CalendarSource {
     config: CalendarSourceConfig,
+    agent: Agent,
     password_prompt_sender: async_channel::Sender<EwsPasswordPrompt>,
 }
 
@@ -30,7 +31,15 @@ impl CalendarSource {
         config: CalendarSourceConfig,
         password_prompt_sender: async_channel::Sender<EwsPasswordPrompt>,
     ) -> Self {
+        let agent = match &config {
+            CalendarSourceConfig::Ics { .. } => Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(5)))
+                .build()
+                .into(),
+            CalendarSourceConfig::Ews { .. } => ews::http_agent(Duration::from_secs(20)),
+        };
         CalendarSource {
+            agent,
             config,
             password_prompt_sender,
         }
@@ -44,7 +53,7 @@ impl CalendarSource {
         end_time: DateTime<Tz>,
     ) -> Result<Vec<Event>, CalendarError> {
         match &self.config {
-            CalendarSourceConfig::Ics { url, user_agent } => get_ical(url, user_agent)
+            CalendarSourceConfig::Ics { url, user_agent } => get_ical(&self.agent, url, user_agent)
                 .and_then(|text| meeters_ical::extract_events(&text, local_tz, use_zoommtg)),
             CalendarSourceConfig::Ews { url, user } => self.fetch_ews_events(
                 &EwsConfig {
@@ -69,6 +78,7 @@ impl CalendarSource {
     ) -> Result<Vec<Event>, CalendarError> {
         let password = self.get_or_prompt_password(ews_config, false)?;
         match ews::fetch_events(
+            &self.agent,
             ews_config,
             &password,
             local_tz,
@@ -80,6 +90,7 @@ impl CalendarSource {
             Err(EwsError::AuthFailed) => {
                 let password = self.get_or_prompt_password(ews_config, true)?;
                 ews::fetch_events(
+                    &self.agent,
                     ews_config,
                     &password,
                     local_tz,
@@ -138,12 +149,8 @@ impl CalendarSource {
     }
 }
 
-fn get_ical(url: &str, user_agent: &str) -> Result<String, CalendarError> {
+fn get_ical(agent: &Agent, url: &str, user_agent: &str) -> Result<String, CalendarError> {
     log::debug!("fetching calendar data from ICS source");
-    let config = Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(5)))
-        .build();
-    let agent: Agent = config.into();
     agent
         .get(url)
         .header("User-Agent", user_agent)
@@ -164,40 +171,55 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
-    use super::get_ical;
+    use super::{get_ical, CalendarSource};
+    use crate::config::CalendarSourceConfig;
+    use std::time::Duration;
 
     #[test]
-    fn sends_configured_user_agent_to_ical_source() {
+    fn ical_reuses_connection_across_source_clones_and_sends_user_agent() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0; 1024];
-            while !request.ends_with(b"\r\n\r\n") {
-                let bytes_read = stream.read(&mut buffer).unwrap();
-                assert_ne!(bytes_read, 0, "connection closed before request headers");
-                request.extend_from_slice(&buffer[..bytes_read]);
-            }
-
             stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ncalendar",
-                )
+                .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.ends_with(b"\r\n\r\n") {
+                    let bytes_read = stream.read(&mut buffer).unwrap();
+                    assert_ne!(bytes_read, 0, "connection closed before request headers");
+                    request.extend_from_slice(&buffer[..bytes_read]);
+                }
 
-            String::from_utf8_lossy(&request).into_owned()
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\ncalendar")
+                    .unwrap();
+
+                requests.push(String::from_utf8_lossy(&request).into_owned());
+            }
+            requests
         });
 
-        let calendar = get_ical(
-            &format!("http://{}/calendar.ics", address),
-            "CustomCalendarClient/1.0",
-        )
-        .unwrap();
-
-        assert_eq!(calendar, "calendar");
-        let request = server.join().unwrap().to_ascii_lowercase();
-        assert!(request.contains("user-agent: customcalendarclient/1.0\r\n"));
+        let url = format!("http://{}/calendar.ics", address);
+        let source = CalendarSource::new(
+            CalendarSourceConfig::Ics {
+                url: url.clone(),
+                user_agent: "CustomCalendarClient/1.0".into(),
+            },
+            async_channel::unbounded().0,
+        );
+        for source in [source.clone(), source] {
+            let calendar = get_ical(&source.agent, &url, "CustomCalendarClient/1.0").unwrap();
+            assert_eq!(calendar, "calendar");
+        }
+        for request in server.join().unwrap() {
+            assert!(request
+                .to_ascii_lowercase()
+                .contains("user-agent: customcalendarclient/1.0\r\n"));
+        }
     }
 }
 
