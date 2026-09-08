@@ -24,7 +24,6 @@ glib = "0.22.9"
 # Keep newer GTK API features disabled: release binaries must support Ubuntu 22.04.
 gtk = { package = "gtk4", version = "0.11.4" }
 ical = "0.11"
-lazy_static = "1.4"
 ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
 log = "0.4"
 multimap = "0.10"

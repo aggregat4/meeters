@@ -9,11 +9,11 @@ use chrono_tz::{Tz, UTC};
 use either::{Either, Left};
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
-use lazy_static::lazy_static;
 use regex::Regex;
 use rrule::RRuleSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use crate::domain::*;
 use crate::ical_util::{
@@ -224,22 +224,20 @@ fn extract_start_end_time(
 }
 
 pub(crate) fn parse_zoom_url(text: &str) -> Option<String> {
-    lazy_static! {
-        static ref ZOOM_URL_REGEX: regex::Regex =
-            Regex::new(r"https?://[^\s]*zoom.us/(j|my)/[^\s\n\r<>]+").unwrap();
-    }
+    static ZOOM_URL_REGEX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"https?://[^\s]*zoom.us/(j|my)/[^\s\n\r<>]+").unwrap());
     ZOOM_URL_REGEX
         .find(text)
         .map(|mat| mat.as_str().to_string())
 }
 
 pub fn convert_to_zoommtg(url: &str) -> Option<String> {
-    lazy_static! {
-        static ref ZOOM_URL_CONVERT_REGEX: regex::Regex = Regex::new(
-            r"https?://(?:(?P<company>[^.]+)\.)?zoom\.us/j/(?P<id>\d+)(?:\?pwd=(?P<pwd>[^&]+))?"
+    static ZOOM_URL_CONVERT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"https?://(?:(?P<company>[^.]+)\.)?zoom\.us/j/(?P<id>\d+)(?:\?pwd=(?P<pwd>[^&]+))?",
         )
-        .unwrap();
-    }
+        .unwrap()
+    });
     ZOOM_URL_CONVERT_REGEX.captures(url).map(|caps| {
         let id = caps
             .name("id")

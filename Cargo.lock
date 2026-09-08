@@ -1550,7 +1550,6 @@ dependencies = [
  "ical",
  "keyring",
  "ksni",
- "lazy_static",
  "log",
  "multimap",
  "notify-rust",

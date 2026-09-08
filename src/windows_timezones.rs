@@ -1,12 +1,11 @@
 use chrono_tz::Tz;
-use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-lazy_static! {
-    pub static ref WINDOWS_TZ_TO_CHRONO_TZ: HashMap<String, Tz> = read_windows_zones();
-    pub static ref FUCKED_WINDOWS_TZ_TO_CHRONO_TZ: HashMap<String, Tz> =
-        read_fucked_windows_zones();
-}
+pub static WINDOWS_TZ_TO_CHRONO_TZ: LazyLock<HashMap<String, Tz>> =
+    LazyLock::new(read_windows_zones);
+pub static FUCKED_WINDOWS_TZ_TO_CHRONO_TZ: LazyLock<HashMap<String, Tz>> =
+    LazyLock::new(read_fucked_windows_zones);
 
 fn read_windows_zones() -> HashMap<String, Tz> {
     let doc = roxmltree::Document::parse_with_options(
