@@ -61,6 +61,104 @@ fn rendered_events_overlap(a: &Event, b: &Event, events: &[Event], start_hour: i
     overlap >= MINIMUM_RENDERED_OVERLAP_FOR_COLUMNS
 }
 
+#[derive(Debug)]
+struct PositionedEvent<'a> {
+    event: &'a Event,
+    lane_index: usize,
+    lane_count: usize,
+}
+
+fn sorted_events(events: &[Event]) -> Vec<&Event> {
+    let mut sorted_events: Vec<_> = events.iter().collect();
+    sorted_events.sort_by(|a, b| {
+        a.start_timestamp
+            .cmp(&b.start_timestamp)
+            .then_with(|| b.end_timestamp.cmp(&a.end_timestamp))
+            .then_with(|| a.summary.cmp(&b.summary))
+    });
+    sorted_events
+}
+
+fn overlapping_event_groups<'a>(events: &'a [Event], start_hour: i32) -> Vec<Vec<&'a Event>> {
+    let mut event_groups: Vec<Vec<&Event>> = Vec::new();
+
+    for event in sorted_events(events) {
+        let mut matching_group_indices: Vec<usize> = event_groups
+            .iter()
+            .enumerate()
+            .filter_map(|(index, group)| {
+                let overlaps_group = group
+                    .iter()
+                    .any(|existing| rendered_events_overlap(event, existing, events, start_hour));
+
+                overlaps_group.then_some(index)
+            })
+            .collect();
+
+        if matching_group_indices.is_empty() {
+            event_groups.push(vec![event]);
+            continue;
+        }
+
+        let first_group_index = matching_group_indices.remove(0);
+        event_groups[first_group_index].push(event);
+
+        for group_index in matching_group_indices.into_iter().rev() {
+            let mut merged_group = event_groups.remove(group_index);
+            event_groups[first_group_index].append(&mut merged_group);
+        }
+    }
+
+    event_groups
+}
+
+fn positioned_events<'a>(events: &'a [Event], start_hour: i32) -> Vec<PositionedEvent<'a>> {
+    let mut positioned_events = Vec::new();
+
+    for mut group in overlapping_event_groups(events, start_hour) {
+        group.sort_by(|a, b| {
+            a.start_timestamp
+                .cmp(&b.start_timestamp)
+                .then_with(|| b.end_timestamp.cmp(&a.end_timestamp))
+                .then_with(|| a.summary.cmp(&b.summary))
+        });
+
+        let mut lanes: Vec<Vec<&Event>> = Vec::new();
+        let mut group_positions: Vec<(&Event, usize)> = Vec::new();
+
+        for event in group {
+            let maybe_lane_index = lanes.iter().position(|lane| {
+                lane.iter()
+                    .all(|existing| !rendered_events_overlap(event, existing, events, start_hour))
+            });
+
+            let lane_index = match maybe_lane_index {
+                Some(index) => {
+                    lanes[index].push(event);
+                    index
+                }
+                None => {
+                    lanes.push(vec![event]);
+                    lanes.len() - 1
+                }
+            };
+
+            group_positions.push((event, lane_index));
+        }
+
+        let lane_count = lanes.len();
+        positioned_events.extend(group_positions.into_iter().map(|(event, lane_index)| {
+            PositionedEvent {
+                event,
+                lane_index,
+                lane_count,
+            }
+        }));
+    }
+
+    positioned_events
+}
+
 fn compact_room_label(event: &Event) -> Option<String> {
     let label = match event.metadata.rooms.as_slice() {
         [] => None,
@@ -132,8 +230,8 @@ impl TimelineView {
         let label = gtk::Label::new(Some(text));
         label.set_selectable(true);
         label.set_xalign(0.0);
-        label.set_line_wrap(true);
-        label.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+        label.set_wrap(true);
+        label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         label.set_max_width_chars(58);
         style_label_with_css(&label, color, extra_css);
 
@@ -150,9 +248,9 @@ impl TimelineView {
             Self::selectable_label(label, TEXT_SUBTLE, "font-size: 11px; font-weight: 700;");
         let value_widget = Self::selectable_label(value, "#242a31", "font-size: 13px;");
 
-        row.pack_start(&label_widget, false, false, 0);
-        row.pack_start(&value_widget, false, false, 0);
-        container.pack_start(&row, false, false, 0);
+        row.append(&label_widget);
+        row.append(&value_widget);
+        container.append(&row);
     }
 
     fn add_description(container: &gtk::Box, description: &str) {
@@ -166,10 +264,9 @@ impl TimelineView {
             TEXT_SUBTLE,
             "font-size: 11px; font-weight: 700;",
         );
-        container.pack_start(&label, false, false, 0);
+        container.append(&label);
 
-        let scrolled_window =
-            gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+        let scrolled_window = gtk::ScrolledWindow::new();
         scrolled_window.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         scrolled_window.set_min_content_width(420);
         scrolled_window.set_min_content_height(90);
@@ -179,10 +276,7 @@ impl TimelineView {
         text_view.set_editable(false);
         text_view.set_cursor_visible(true);
         text_view.set_wrap_mode(gtk::WrapMode::WordChar);
-        text_view
-            .buffer()
-            .expect("TextView buffer must exist")
-            .set_text(trimmed_description);
+        text_view.buffer().set_text(trimmed_description);
         load_css(
             &text_view.style_context(),
             "textview, textview text { \
@@ -192,12 +286,14 @@ impl TimelineView {
             }",
         );
 
-        scrolled_window.add(&text_view);
-        container.pack_start(&scrolled_window, true, true, 0);
+        scrolled_window.set_child(Some(&text_view));
+        scrolled_window.set_vexpand(true);
+        container.append(&scrolled_window);
     }
 
     fn create_event_popover(event: &Event, button: &gtk::Button) -> gtk::Popover {
-        let popover = gtk::Popover::new(Some(button));
+        let popover = gtk::Popover::new();
+        popover.set_parent(button);
         popover.set_position(gtk::PositionType::Bottom);
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
@@ -212,7 +308,7 @@ impl TimelineView {
             "#242a31",
             "font-size: 15px; font-weight: 700;",
         );
-        content.pack_start(&title, false, false, 0);
+        content.append(&title);
 
         Self::add_detail_row(&content, "Time", &event_time_range(event));
 
@@ -251,14 +347,14 @@ impl TimelineView {
             join_button.connect_clicked(move |_| {
                 open_meeting(&url);
             });
-            actions.pack_start(&join_button, false, false, 0);
+            actions.append(&join_button);
 
             let link_button = gtk::LinkButton::with_label(meet_url, "Meeting link");
-            actions.pack_start(&link_button, false, false, 0);
-            content.pack_start(&actions, false, false, 0);
+            actions.append(&link_button);
+            content.append(&actions);
         }
 
-        popover.add(&content);
+        popover.set_child(Some(&content));
         popover
     }
 
@@ -305,8 +401,11 @@ impl TimelineView {
         button.set_child(Some(&label));
 
         let popover = Self::create_event_popover(event, &button);
+        let popover_for_cleanup = popover.clone();
+        button.connect_destroy(move |_| {
+            popover_for_cleanup.unparent();
+        });
         button.connect_clicked(move |_| {
-            popover.show_all();
             popover.popup();
         });
 
@@ -417,38 +516,16 @@ impl TimelineView {
             meeting_area.put(&separator, 0.0, f64::from(y_position));
         }
 
-        let mut event_groups: Vec<Vec<&Event>> = Vec::new();
-        for event in &regular_events {
-            let mut found_group = false;
-            for group in &mut event_groups {
-                let overlaps = group.iter().any(|existing| {
-                    rendered_events_overlap(event, existing, &regular_events, start_hour)
-                });
+        for positioned_event in positioned_events(&regular_events, start_hour) {
+            let button_width = event_button_width(positioned_event.lane_count as i32, spacing);
+            let (y_position, height) =
+                rendered_event_geometry(positioned_event.event, &regular_events, start_hour);
+            let x_position =
+                spacing + (button_width + spacing) * positioned_event.lane_index as i32;
 
-                if overlaps {
-                    group.push(event);
-                    found_group = true;
-                    break;
-                }
-            }
-
-            if !found_group {
-                event_groups.push(vec![event]);
-            }
-        }
-
-        for group in event_groups {
-            let group_size = group.len() as i32;
-            let button_width = event_button_width(group_size, spacing);
-
-            for (index, event) in group.iter().enumerate() {
-                let (y_position, height) =
-                    rendered_event_geometry(event, &regular_events, start_hour);
-                let x_position = spacing + (button_width + spacing) * index as i32;
-
-                let button = Self::create_event_button(event, button_width, height, true);
-                meeting_area.put(&button, f64::from(x_position), f64::from(y_position));
-            }
+            let button =
+                Self::create_event_button(positioned_event.event, button_width, height, true);
+            meeting_area.put(&button, f64::from(x_position), f64::from(y_position));
         }
 
         if is_today {
@@ -546,6 +623,16 @@ mod tests {
     }
 
     fn event(summary: &str, start_hour: u32, start_minute: u32, end_minute: u32) -> Event {
+        event_between(summary, start_hour, start_minute, start_hour, end_minute)
+    }
+
+    fn event_between(
+        summary: &str,
+        start_hour: u32,
+        start_minute: u32,
+        end_hour: u32,
+        end_minute: u32,
+    ) -> Event {
         Event {
             summary: summary.to_string(),
             description: String::new(),
@@ -554,7 +641,7 @@ mod tests {
             metadata: EventMetadata::empty(),
             all_day: false,
             start_timestamp: berlin_datetime(2026, 5, 19, start_hour, start_minute),
-            end_timestamp: berlin_datetime(2026, 5, 19, start_hour, end_minute),
+            end_timestamp: berlin_datetime(2026, 5, 19, end_hour, end_minute),
         }
     }
 
@@ -590,6 +677,56 @@ mod tests {
         let events = vec![first.clone(), second.clone()];
 
         assert!(!rendered_events_overlap(&first, &second, &events, 8));
+    }
+
+    #[test]
+    fn positioned_events_reuse_lanes_for_non_overlapping_events_in_same_group() {
+        let events = vec![
+            event_between("blocker", 15, 0, 18, 0),
+            event_between("development operations", 15, 0, 16, 0),
+            event_between("room setup", 16, 0, 16, 30),
+            event_between("room handoff", 16, 30, 17, 0),
+        ];
+
+        let positions = positioned_events(&events, 8);
+        let event_position = |summary: &str| {
+            positions
+                .iter()
+                .find(|position| position.event.summary == summary)
+                .unwrap()
+        };
+
+        assert_eq!(event_position("blocker").lane_index, 0);
+        assert_eq!(event_position("development operations").lane_index, 1);
+        assert_eq!(event_position("room setup").lane_index, 1);
+        assert_eq!(event_position("room handoff").lane_index, 1);
+        assert!(positions.iter().all(|position| position.lane_count == 2));
+    }
+
+    #[test]
+    fn positioned_events_keep_rendered_overlaps_in_separate_lanes() {
+        let events = vec![event("first", 11, 0, 15), event("second", 11, 15, 30)];
+
+        let positions = positioned_events(&events, 8);
+
+        assert_eq!(positions[0].lane_count, 2);
+        assert_eq!(positions[1].lane_count, 2);
+        assert_ne!(positions[0].lane_index, positions[1].lane_index);
+    }
+
+    #[test]
+    fn positioned_events_do_not_stagger_sequential_meetings() {
+        let events = vec![
+            event_between("first", 11, 0, 11, 30),
+            event_between("second", 11, 30, 12, 0),
+            event_between("third", 12, 0, 12, 30),
+        ];
+
+        let positions = positioned_events(&events, 8);
+
+        assert_eq!(positions.len(), 3);
+        assert!(positions.iter().all(|position| position.lane_index == 0));
+        assert!(positions.iter().all(|position| position.lane_count == 1));
     }
 
     #[test]
