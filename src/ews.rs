@@ -538,6 +538,66 @@ mod tests {
     }
 
     #[test]
+    fn soap_honors_no_proxy_environment() {
+        const CHILD_URL: &str = "MEETERS_TEST_NO_PROXY_URL";
+        if let Ok(url) = std::env::var(CHILD_URL) {
+            let agent = http_agent(Duration::from_secs(2));
+            let proxy = agent
+                .config()
+                .proxy()
+                .expect("proxy configured by environment");
+            assert!(proxy.is_no_proxy(&url.parse().unwrap()));
+            let config = EwsConfig {
+                url,
+                user: "user".into(),
+            };
+            assert_eq!(
+                post_soap(&agent, &config, "password", "body", "action").unwrap(),
+                "ok"
+            );
+            return;
+        }
+
+        // Isolate environment changes from other tests and background threads.
+        let (config, server) = serve_response(200, b"ok".to_vec(), Duration::ZERO);
+        let unused_proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args([
+            "--exact",
+            "ews::tests::soap_honors_no_proxy_environment",
+            "--nocapture",
+        ]);
+        for key in [
+            "ALL_PROXY",
+            "all_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ] {
+            child.env_remove(key);
+        }
+        let output = child
+            .env(CHILD_URL, config.url)
+            .env(
+                "HTTP_PROXY",
+                format!("http://{}", unused_proxy.local_addr().unwrap()),
+            )
+            .env("NO_PROXY", "127.0.0.1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
     fn soap_preserves_auth_errors_and_rejects_redirects_and_server_errors() {
         for status in [401, 403, 302, 500] {
             let (config, server) = serve_response(status, vec![], Duration::ZERO);

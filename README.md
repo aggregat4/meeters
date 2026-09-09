@@ -38,9 +38,8 @@ When using EWS, meeters asks for the Exchange password in the UI on first refres
 in the desktop keyring/wallet. EWS requests use Basic auth over HTTPS.
 
 ICS and EWS use reusable Ureq HTTP clients. EWS requests do not follow redirects.
-The pinned Ureq version reads proxy environment variables but does not honor
-`NO_PROXY` exclusions. If an internal Exchange server must be reached directly,
-launch meeters with the proxy environment variables unset.
+Proxy settings are read from environment variables when the client is created.
+Use `NO_PROXY` to bypass the proxy for internal hosts such as an Exchange server.
 
 The EWS password is stored through the FreeDesktop Secret Service API, which is typically backed
 by GNOME Keyring, KDE Wallet, or a compatible provider such as KeePassXC. The keyring service name
