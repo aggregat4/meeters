@@ -35,6 +35,11 @@ jobs:
       run: /usr/bin/python3 tests/check_glibc.py target/release/meeters --max-version 2.35
     - name: Run tests
       run: cargo test --locked --verbose
+    - name: Check timeline tests across timezones
+      run: |
+        for test_timezone in UTC Europe/Berlin Asia/Kolkata; do
+          TZ="$test_timezone" cargo test --locked gui::timeline::tests
+        done
     - name: Desktop smoke tests
       timeout-minutes: 5
       run: |

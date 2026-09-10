@@ -616,10 +616,13 @@ mod tests {
         assert_eq!(event_button_width(4, 10), 200);
     }
 
-    fn berlin_datetime(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> DateTime<Tz> {
-        chrono_tz::Europe::Berlin
+    fn local_datetime(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> DateTime<Tz> {
+        // Fixtures describe displayed wall-clock times, regardless of the host timezone.
+        // Store them in UTC to exercise the formatter's conversion back to Local.
+        Local
             .with_ymd_and_hms(year, month, day, hour, minute, 0)
             .unwrap()
+            .with_timezone(&chrono_tz::UTC)
     }
 
     fn event(summary: &str, start_hour: u32, start_minute: u32, end_minute: u32) -> Event {
@@ -640,8 +643,8 @@ mod tests {
             meeturl: None,
             metadata: EventMetadata::empty(),
             all_day: false,
-            start_timestamp: berlin_datetime(2026, 5, 19, start_hour, start_minute),
-            end_timestamp: berlin_datetime(2026, 5, 19, end_hour, end_minute),
+            start_timestamp: local_datetime(2026, 5, 19, start_hour, start_minute),
+            end_timestamp: local_datetime(2026, 5, 19, end_hour, end_minute),
         }
     }
 
