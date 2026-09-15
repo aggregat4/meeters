@@ -7,7 +7,6 @@ use crate::ical_util::find_property_value;
 use crate::ical_util::properties_to_string;
 use crate::ical_util::unescape_string;
 use chrono::prelude::*;
-use chrono::DateTime;
 use chrono_tz::Tz;
 use either::Either;
 use either::Left;
@@ -77,19 +76,17 @@ fn parse_standard_tz(tzid: &str) -> Result<Tz, String> {
 /// Parses the VTIMEZONEs from the calendar and returns a map from timezone id to CustomTz
 pub fn parse_ical_timezones(
     calendar: &IcalCalendar,
-    local_tz: &Tz,
     evaluation_year: i32,
 ) -> Result<HashMap<String, CustomTz>, CalendarError> {
     calendar
         .timezones
         .iter()
-        .map(|vtimezone| parse_ical_timezone(vtimezone, local_tz, evaluation_year))
+        .map(|vtimezone| parse_ical_timezone(vtimezone, evaluation_year))
         .collect()
 }
 
 fn parse_ical_timezone(
     vtimezone: &IcalTimeZone,
-    local_tz: &Tz,
     evaluation_year: i32,
 ) -> Result<(String, CustomTz), CalendarError> {
     match find_property_value(&vtimezone.properties, "TZID") {
@@ -98,7 +95,7 @@ fn parse_ical_timezone(
             let unescaped_name = unescape_string(&name.to_string());
             let timezone = CustomTz {
                 name: unescaped_name.clone(),
-                timespanset: parse_timespansets(vtimezone, local_tz, evaluation_year)?, // pass on the error
+                timespanset: parse_timespansets(vtimezone, evaluation_year)?,
             };
             log::debug!(
                 "Parsed custom timezone definition '{:?}' with '{:?}' spans",
@@ -122,9 +119,9 @@ fn parse_ical_timezone(
 /// This allows us to generate many fewer timespansets and preserve memory and performance.
 fn parse_occurrences_from_timespan(
     properties: &[Property],
-    local_tz: &Tz,
-    evaluation_year: i32,
-) -> Result<Vec<DateTime<Tz>>, CalendarError> {
+    current_year: i32,
+    offset_from: i32,
+) -> Result<Vec<NaiveDateTime>, CalendarError> {
     let maybe_dtstart_prop = find_property(properties, "DTSTART");
     let maybe_rrule_prop = find_property(properties, "RRULE");
     if maybe_dtstart_prop.is_none() {
@@ -133,31 +130,62 @@ fn parse_occurrences_from_timespan(
         });
     }
     if maybe_rrule_prop.is_some() {
-        let rule_props = vec![
-            maybe_rrule_prop.unwrap().clone(),
-            maybe_dtstart_prop.unwrap().clone(),
-        ];
+        // The recurrence engine expands local fields. UNTIL is UTC in a
+        // VTIMEZONE, so express it using the same pre-transition offset first.
+        let mut rule = maybe_rrule_prop.unwrap().clone();
+        let value = rule.value.as_deref().ok_or_else(|| CalendarError {
+            msg: "Missing timezone RRULE value".into(),
+        })?;
+        rule.value = Some(
+            value
+                .split(';')
+                .map(|part| {
+                    if let Some(until) = part
+                        .strip_prefix("UNTIL=")
+                        .and_then(|v| v.strip_suffix('Z'))
+                    {
+                        let utc =
+                            NaiveDateTime::parse_from_str(until, "%Y%m%dT%H%M%S").map_err(|e| {
+                                CalendarError {
+                                    msg: format!("Invalid timezone UNTIL: {e}"),
+                                }
+                            })?;
+                        let local = utc
+                            .checked_add_signed(chrono::Duration::seconds(i64::from(offset_from)))
+                            .ok_or_else(|| CalendarError {
+                                msg: "Timezone UNTIL out of range".into(),
+                            })?;
+                        Ok(format!("UNTIL={}", local.format("%Y%m%dT%H%M%S")))
+                    } else {
+                        Ok(part.to_string())
+                    }
+                })
+                .collect::<Result<Vec<_>, CalendarError>>()?
+                .join(";"),
+        );
+        let rule_props = vec![rule, maybe_dtstart_prop.unwrap().clone()];
         // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
         let event_as_string = properties_to_string(&rule_props);
-        let current_year = evaluation_year;
         match event_as_string.parse::<RRuleSet>() {
             // We only take occurrences in a short interval around the current year since we are
             // only interested in current dates
             Ok(ruleset) => {
-                let relevant_transitions: Vec<DateTime<Tz>> = ruleset
+                let relevant_transitions: Vec<NaiveDateTime> = ruleset
                     .clone()
                     .into_iter()
                     .skip_while(|d| d.year() < (current_year - 2))
                     .take_while(|d| d.year() < (current_year + 2))
+                    .map(|d| d.naive_local())
                     .collect();
                 if relevant_transitions.is_empty() {
                     // There could be a case where there are no transitions around our current year.
                     // For example for a country that dropped daylight savings at some point in the
                     // past. For this case we return simply the last 4 transitions coming right
                     // before the current year
-                    let all_transitions_before_now: Vec<DateTime<Tz>> = ruleset
+                    let all_transitions_before_now: Vec<NaiveDateTime> = ruleset
                         .into_iter()
                         .take_while(|d| d.year() < current_year)
+                        .map(|d| d.naive_local())
                         .collect();
                     Ok(all_transitions_before_now
                         .into_iter()
@@ -183,7 +211,7 @@ fn parse_occurrences_from_timespan(
         // See also https://icalendar.org/iCalendar-RFC-5545/3-6-5-time-zone-component.html
         let date_time_str = maybe_dtstart_prop.unwrap().value.as_ref().unwrap();
         match NaiveDateTime::parse_from_str(date_time_str, "%Y%m%dT%H%M%S") {
-            Ok(dt) => Ok(vec![local_tz.from_local_datetime(&dt).unwrap()]),
+            Ok(dt) => Ok(vec![dt]),
             Err(e) => Err(CalendarError {
                 msg: format!(
                     "Could not parse DTSTART for timezone timespan with value {:?} and error: {:?}",
@@ -209,7 +237,6 @@ fn parse_occurrences_from_timespan(
 ///
 fn parse_timespansets(
     vtimezone: &IcalTimeZone,
-    local_tz: &Tz,
     evaluation_year: i32,
 ) -> Result<FixedTimespanSet, CalendarError> {
     // convert the ical timezone transitions into our own struct
@@ -222,11 +249,12 @@ fn parse_timespansets(
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times
     let mut transition_points: Vec<TransitionPoint> = vec![];
     for (pos, transition) in transitions.iter().enumerate() {
-        match parse_occurrences_from_timespan(&transition.properties, local_tz, evaluation_year) {
+        match parse_occurrences_from_timespan(&transition.properties, evaluation_year, transition.offsetfrom) {
             Ok(occurrences) => {
                 for dt in occurrences {
                     transition_points.push(TransitionPoint {
-                        timestamp: dt.timestamp(),
+                        // An observance onset uses the offset in effect before the change.
+                        timestamp: dt.and_utc().timestamp() - i64::from(transition.offsetfrom),
                         transition_index: pos,
                     })
                 }
@@ -272,7 +300,7 @@ struct TransitionPoint {
 
 struct TimezoneTransition {
     properties: Vec<Property>,
-    _offsetfrom: i32,
+    offsetfrom: i32,
     offsetto: i32,
 }
 
@@ -281,26 +309,45 @@ fn parse_icaltimezonetransition(
 ) -> Result<TimezoneTransition, CalendarError> {
     Ok(TimezoneTransition {
         properties: transition.properties.to_owned(),
-        _offsetfrom: offset_to_seconds(
+        offsetfrom: offset_to_seconds(
             find_property_value(&transition.properties, "TZOFFSETFROM").ok_or(CalendarError {
                 msg: "no TZOFFSETFROM in timezone transition".to_string(),
             })?,
-        ),
+        )?,
         offsetto: offset_to_seconds(
             find_property_value(&transition.properties, "TZOFFSETTO").ok_or(CalendarError {
                 msg: "no TZOFFSETTO in timezone transition".to_string(),
             })?,
-        ),
+        )?,
     })
 }
 
-/// Converts offsets in string form like "+0200" or more generally
-/// "+HHMM" to the matching number of seconds.
-fn offset_to_seconds(offset: String) -> i32 {
-    let mut seconds = 0;
-    seconds += offset[..3].parse::<i32>().unwrap() * 3600;
-    seconds += offset[3..].parse::<i32>().unwrap() * 60;
-    seconds
+/// Parse an iCalendar UTC-OFFSET (+/-HHMM[SS]); the sign covers all fields.
+fn offset_to_seconds(offset: String) -> Result<i32, CalendarError> {
+    let invalid = || CalendarError {
+        msg: format!("Invalid timezone offset: {offset:?}"),
+    };
+    let bytes = offset.as_bytes();
+    if !matches!(bytes.len(), 5 | 7)
+        || !matches!(bytes[0], b'+' | b'-')
+        || !bytes[1..].iter().all(u8::is_ascii_digit)
+    {
+        return Err(invalid());
+    }
+    let pair = |i| i32::from(bytes[i] - b'0') * 10 + i32::from(bytes[i + 1] - b'0');
+    let (hours, minutes, seconds) = (pair(1), pair(3), if bytes.len() == 7 { pair(5) } else { 0 });
+    if hours > 23 || minutes > 59 || seconds > 59 {
+        return Err(invalid());
+    }
+    let magnitude = hours * 3600 + minutes * 60 + seconds;
+    if bytes[0] == b'-' && magnitude == 0 {
+        return Err(invalid());
+    }
+    Ok(if bytes[0] == b'-' {
+        -magnitude
+    } else {
+        magnitude
+    })
 }
 
 // Example custom timezone by Exchange for Western European Standard Time
@@ -360,6 +407,79 @@ fn offset_to_seconds(offset: String) -> i32 {
 mod tests {
     use super::*;
     use chrono_tz::Europe::{Berlin, Dublin, Vienna};
+
+    #[test]
+    fn signed_offsets_include_minutes_and_optional_seconds() {
+        for (input, expected) in [
+            ("-0330", -12600),
+            ("-0030", -1800),
+            ("+0545", 20700),
+            ("-033015", -12615),
+            ("+000030", 30),
+            ("+0000", 0),
+        ] {
+            assert_eq!(
+                offset_to_seconds(input.into()).unwrap(),
+                expected,
+                "{input}"
+            );
+        }
+        for input in [
+            "", "0330", "+2400", "+0060", "+000060", "-0000", "-000000", "+0é0", "+0x30",
+        ] {
+            assert!(offset_to_seconds(input.into()).is_err(), "{input}");
+        }
+    }
+
+    #[test]
+    fn observance_until_is_inclusive_in_pre_transition_offset() {
+        let property = |name: &str, value: &str| Property {
+            name: name.into(),
+            value: Some(value.into()),
+            params: None,
+        };
+        for (offset, until, before) in [
+            (3600, "20240331T010000Z", "20240331T005959Z"),
+            (-14400, "20240331T060000Z", "20240331T055959Z"),
+        ] {
+            for (bound, expected_len) in [(until, 2), (before, 1)] {
+                let properties = vec![
+                    property("DTSTART", "20230326T020000"),
+                    property(
+                        "RRULE",
+                        &format!("FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU;UNTIL={bound}"),
+                    ),
+                ];
+                let dates = parse_occurrences_from_timespan(&properties, 2024, offset).unwrap();
+                assert_eq!(dates.len(), expected_len, "{offset}: {bound}");
+                assert_eq!(dates[0].to_string(), "2023-03-26 02:00:00");
+                if expected_len == 2 {
+                    assert_eq!(dates[1].to_string(), "2024-03-31 02:00:00");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nonrecurring_observances_use_previous_offset() {
+        let text = "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Test\nBEGIN:DAYLIGHT\nDTSTART:20240331T020000\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0200\nEND:DAYLIGHT\nBEGIN:STANDARD\nDTSTART:20241027T030000\nTZOFFSETFROM:+0200\nTZOFFSETTO:+0100\nEND:STANDARD\nEND:VTIMEZONE\nEND:VCALENDAR\n";
+        let calendar = ical::IcalParser::new(text.as_bytes())
+            .next()
+            .unwrap()
+            .unwrap();
+        let zones = parse_ical_timezones(&calendar, 2024).unwrap();
+        let actual: Vec<_> = zones["Test"]
+            .timespanset
+            .rest
+            .iter()
+            .map(|(ts, _)| *ts)
+            .collect();
+        let expected: Vec<_> = ["2024-03-31T01:00:00Z", "2024-10-27T01:00:00Z"]
+            .iter()
+            .map(|s| DateTime::parse_from_rfc3339(s).unwrap().timestamp())
+            .collect();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn parses_iana_strings() {

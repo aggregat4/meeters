@@ -688,7 +688,7 @@ fn extract_events_for_year(
 ) -> Result<Vec<Event>, CalendarError> {
     match parse_calendar(text)? {
         Some(calendar) => {
-            let calendar_timezones = parse_ical_timezones(&calendar, local_tz, evaluation_year)?;
+            let calendar_timezones = parse_ical_timezones(&calendar, evaluation_year)?;
             let event_tuples = parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out

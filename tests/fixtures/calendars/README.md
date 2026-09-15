@@ -39,11 +39,20 @@ America/New_York and Asia/Kolkata. Tests do not change process-global TZ.
 `cargo test --locked` retains the committed dependency and bundled chrono-tz
 data versions. Review changes to expected instants when updating those versions.
 
-## Known timezone defects
+## Fixed timezone regressions
 
-`negative_fractional_offset` and `exchange_transition_instant` assert desired
-behavior but are ignored until the offset and transition fixes land.
-Run them with `cargo test --locked calendar_compatibility -- --ignored`.
+These regressions run normally in CI:
+
+| Test | Contract |
+| --- | --- |
+| `negative_fractional_offset` | `-0330` is minus 3 hours 30 minutes, so 09:00 local is 12:30 UTC |
+| `exchange_transition_instant` | Onsets use TZOFFSETFROM; exact spring and autumn boundaries resolve correctly |
+
+The transition fixture tests the parsed zone directly to isolate construction
+from event recurrence. Timezone unit tests also cover signed minutes/seconds,
+invalid offsets, non-recurring observances, and inclusive UTC UNTIL bounds with
+positive and negative pre-transition offsets. Construction uses local onset
+fields minus TZOFFSETFROM, independently of the viewer and host timezones.
 
 ## Remaining migration coverage
 

@@ -169,7 +169,6 @@ fn organizer_and_viewer_change_dst_on_different_dates() {
 }
 
 #[test]
-#[ignore = "Known defect: negative offset minutes have wrong sign"]
 fn negative_fractional_offset() {
     check_calendar(
         include_str!("../tests/fixtures/calendars/negative_fractional.ics"),
@@ -180,14 +179,13 @@ fn negative_fractional_offset() {
 }
 
 #[test]
-#[ignore = "Known defect: observance onset ignores TZOFFSETFROM"]
 fn exchange_transition_instant() {
     let calendar = parse_calendar(include_str!(
         "../tests/fixtures/calendars/exchange_transition.ics"
     ))
     .unwrap()
     .unwrap();
-    let zones = parse_ical_timezones(&calendar, &UTC, 2024).unwrap();
+    let zones = parse_ical_timezones(&calendar, 2024).unwrap();
     let zone = &zones["Exchange Western Europe"];
     // Local onset 02:00 with TZOFFSETFROM:+0100 means 01:00 UTC.
     for (utc, expected) in [
