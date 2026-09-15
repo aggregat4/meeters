@@ -1,6 +1,6 @@
 use crate::custom_timezone::CustomTz;
 use crate::ical_util::unescape_string;
-use crate::timezones::parse_ical_timezones;
+use crate::recurrence::Engine;
 use crate::timezones::parse_tzid;
 use chrono::prelude::*;
 use chrono::Duration;
@@ -10,6 +10,7 @@ use either::{Either, Left};
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
 use regex::Regex;
+#[cfg(test)]
 use rrule::RRuleSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -381,8 +382,10 @@ fn parse_occurrences(
     custom_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
     current_year: i32,
+    engine: Engine,
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
-    let mut occurrences = expand_occurrences(properties, custom_timezones, local_tz, current_year)?;
+    let mut occurrences =
+        expand_occurrences(properties, custom_timezones, local_tz, current_year, engine)?;
     let all_day = find_property(properties, "DTSTART").is_some_and(is_ical_date);
     let mut excluded_dates = HashSet::new();
     let mut exclusions = HashSet::new();
@@ -413,6 +416,7 @@ fn expand_occurrences(
     custom_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
     current_year: i32,
+    engine: Engine,
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     // if no DTSTART or RRULE is present we can't do anything and assume we can't calculate occurrences
     let maybe_dtstart_prop = find_property(properties, "DTSTART");
@@ -459,9 +463,8 @@ fn expand_occurrences(
     if all_day_event {
         rule_props.push(rrule_prop.clone());
         let event_as_string = properties_to_string(&rule_props);
-        match event_as_string.parse::<RRuleSet>() {
+        match engine.expand(&event_as_string, current_year + 2) {
             Ok(ruleset) => ruleset
-                .all()
                 .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
@@ -478,9 +481,7 @@ fn expand_occurrences(
                     )
                 })
                 .collect(),
-            Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
-            }),
+            Err(e) => Err(e),
         }
     } else if maybe_tzid_param.is_none() && !dtstart_time_str.ends_with('Z') {
         // CASE 2: we have local datetimes with no timezone information, throw error?
@@ -492,17 +493,14 @@ fn expand_occurrences(
         // CASE 3: UTC datetime, let rrule do its thing, we convert all occurrences to the local TZ
         rule_props.push(rrule_prop.clone());
         let event_as_string = properties_to_string(&rule_props);
-        match event_as_string.parse::<RRuleSet>() {
+        match engine.expand(&event_as_string, current_year + 2) {
             Ok(ruleset) => Ok(ruleset
-                .all()
                 .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
                 .map(|dt| dt.with_timezone(local_tz))
                 .collect()),
-            Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
-            }),
+            Err(e) => Err(e),
         }
     } else if let Some(original_tz) = maybe_original_tz {
         // CASE 4: we have a timestamp with a timezone identifier
@@ -561,9 +559,8 @@ fn expand_occurrences(
         };
         rule_props.push(new_rule_prop);
         let event_as_string = properties_to_string(&rule_props);
-        match event_as_string.parse::<RRuleSet>() {
+        match engine.expand(&event_as_string, current_year + 2) {
             Ok(ruleset) => ruleset
-                .all()
                 .iter()
                 .skip_while(|d| skip_occurrence_pred(d))
                 .take_while(|d| take_occurrence_pred(d))
@@ -593,9 +590,7 @@ fn expand_occurrences(
                     }
                 })
                 .collect(),
-            Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
-            }),
+            Err(e) => Err(e),
         }
     } else {
         Err(CalendarError {
@@ -778,9 +773,23 @@ fn extract_events_for_year(
     use_zoommtg: bool,
     evaluation_year: i32,
 ) -> Result<Vec<Event>, CalendarError> {
+    extract_events_with_engine(text, local_tz, use_zoommtg, evaluation_year, Engine::Fork)
+}
+
+fn extract_events_with_engine(
+    text: &str,
+    local_tz: &Tz,
+    use_zoommtg: bool,
+    evaluation_year: i32,
+    engine: Engine,
+) -> Result<Vec<Event>, CalendarError> {
     match parse_calendar(text)? {
         Some(calendar) => {
-            let calendar_timezones = parse_ical_timezones(&calendar, evaluation_year)?;
+            let calendar_timezones = crate::timezones::parse_ical_timezones_with_engine(
+                &calendar,
+                evaluation_year,
+                engine,
+            )?;
             let event_tuples = parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
@@ -795,6 +804,7 @@ fn extract_events_for_year(
                         &calendar_timezones,
                         local_tz,
                         evaluation_year,
+                        engine,
                     ) {
                         Ok(occurrences) => {
                             if occurrences.is_empty()

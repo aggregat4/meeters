@@ -21,6 +21,7 @@ mod gui;
 mod ical_util;
 mod logging;
 mod meeters_ical;
+mod recurrence;
 mod secrets;
 mod timezones;
 mod windows_timezones;

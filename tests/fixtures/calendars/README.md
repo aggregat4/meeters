@@ -106,3 +106,11 @@ This export exposed Exchange all-day EXDATE and RECURRENCE-ID values encoded as
 TZID-qualified local midnight. These now match the nominal calendar date instead
 of an instant in the display timezone. `all_day_exchange_exceptions.ics` isolates
 the fix; its test also checks standard VALUE=DATE references.
+
+## Comparing recurrence engines
+
+The end-to-end helpers now run each calendar with the fork and test-only upstream
+0.14.0, compare complete event outputs, then apply the existing handwritten
+assertions. Direct timezone fixtures compare the transition tables too.
+See [RRULE_COMPARISON.md](RRULE_COMPARISON.md) for adapter decisions, the discovered
+malformed-BYDAY error-handling difference, and limits of the migration evidence.

@@ -6,6 +6,7 @@ use crate::ical_util::find_property;
 use crate::ical_util::find_property_value;
 use crate::ical_util::properties_to_string;
 use crate::ical_util::unescape_string;
+use crate::recurrence::Engine;
 use chrono::prelude::*;
 use chrono_tz::Tz;
 use either::Either;
@@ -15,7 +16,6 @@ use ical::parser::ical::component::IcalCalendar;
 use ical::parser::ical::component::IcalTimeZone;
 use ical::parser::ical::component::IcalTimeZoneTransition;
 use ical::property::Property;
-use rrule::RRuleSet;
 use std::collections::HashMap;
 
 use crate::windows_timezones::*;
@@ -74,20 +74,30 @@ fn parse_standard_tz(tzid: &str) -> Result<Tz, String> {
 }
 
 /// Parses the VTIMEZONEs from the calendar and returns a map from timezone id to CustomTz
+#[cfg(test)]
 pub fn parse_ical_timezones(
     calendar: &IcalCalendar,
     evaluation_year: i32,
 ) -> Result<HashMap<String, CustomTz>, CalendarError> {
+    parse_ical_timezones_with_engine(calendar, evaluation_year, Engine::Fork)
+}
+
+pub(crate) fn parse_ical_timezones_with_engine(
+    calendar: &IcalCalendar,
+    evaluation_year: i32,
+    engine: Engine,
+) -> Result<HashMap<String, CustomTz>, CalendarError> {
     calendar
         .timezones
         .iter()
-        .map(|vtimezone| parse_ical_timezone(vtimezone, evaluation_year))
+        .map(|vtimezone| parse_ical_timezone(vtimezone, evaluation_year, engine))
         .collect()
 }
 
 fn parse_ical_timezone(
     vtimezone: &IcalTimeZone,
     evaluation_year: i32,
+    engine: Engine,
 ) -> Result<(String, CustomTz), CalendarError> {
     match find_property_value(&vtimezone.properties, "TZID") {
         Some(name) => {
@@ -95,7 +105,7 @@ fn parse_ical_timezone(
             let unescaped_name = unescape_string(&name.to_string());
             let timezone = CustomTz {
                 name: unescaped_name.clone(),
-                timespanset: parse_timespansets(vtimezone, evaluation_year)?,
+                timespanset: parse_timespansets(vtimezone, evaluation_year, engine)?,
             };
             log::debug!(
                 "Parsed custom timezone definition '{:?}' with '{:?}' spans",
@@ -116,6 +126,7 @@ fn parse_occurrences_from_timespan(
     properties: &[Property],
     current_year: i32,
     offset_from: i32,
+    engine: Engine,
 ) -> Result<Vec<NaiveDateTime>, CalendarError> {
     let parse_local = |value: &str| {
         NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S").map_err(|e| CalendarError {
@@ -175,11 +186,7 @@ fn parse_occurrences_from_timespan(
         let rule_props = vec![rule, start.clone()];
         // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
         let event_as_string = properties_to_string(&rule_props);
-        let ruleset = event_as_string
-            .parse::<RRuleSet>()
-            .map_err(|e| CalendarError {
-                msg: format!("error in RRULE parsing: {e}"),
-            })?;
+        let ruleset = engine.expand(&event_as_string, current_year + 2)?;
         // Keep the last onset before the window as well as onsets inside it.
         // An ended observance still determines the offset until a later change.
         let mut previous = None;
@@ -211,6 +218,7 @@ fn parse_occurrences_from_timespan(
 fn parse_timespansets(
     vtimezone: &IcalTimeZone,
     evaluation_year: i32,
+    engine: Engine,
 ) -> Result<FixedTimespanSet, CalendarError> {
     // convert the ical timezone transitions into our own struct
     let transitions: Vec<TimezoneTransition> = vtimezone
@@ -226,7 +234,7 @@ fn parse_timespansets(
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times
     let mut transition_points: Vec<TransitionPoint> = vec![];
     for (pos, transition) in transitions.iter().enumerate() {
-        match parse_occurrences_from_timespan(&transition.properties, evaluation_year, transition.offsetfrom) {
+        match parse_occurrences_from_timespan(&transition.properties, evaluation_year, transition.offsetfrom, engine) {
             Ok(occurrences) => {
                 for dt in occurrences {
                     transition_points.push(TransitionPoint {
@@ -439,7 +447,15 @@ mod tests {
                         &format!("FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU;UNTIL={bound}"),
                     ),
                 ];
-                let dates = parse_occurrences_from_timespan(&properties, 2024, offset).unwrap();
+                let dates =
+                    parse_occurrences_from_timespan(&properties, 2024, offset, Engine::Fork)
+                        .unwrap();
+                assert_eq!(
+                    dates,
+                    parse_occurrences_from_timespan(&properties, 2024, offset, Engine::Upstream)
+                        .unwrap(),
+                    "observance UNTIL behavior differs"
+                );
                 assert_eq!(dates.len(), expected_len, "{offset}: {bound}");
                 assert_eq!(dates[0].to_string(), "2023-03-26 02:00:00");
                 if expected_len == 2 {
