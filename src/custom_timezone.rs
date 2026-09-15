@@ -328,7 +328,73 @@ impl TimeZone for CustomTz {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Timelike;
+    use chrono::{DateTime, Timelike};
+
+    #[test]
+    fn custom_transition_boundaries_gaps_and_folds() {
+        let offset = |seconds| FixedTimespan {
+            utc_offset: seconds,
+            dst_offset: 0,
+            name: "test",
+        };
+        let timestamp = |s| DateTime::parse_from_rfc3339(s).unwrap().timestamp();
+        let zone = CustomTz {
+            name: "Synthetic Europe".into(),
+            timespanset: FixedTimespanSet {
+                first: offset(3600),
+                rest: vec![
+                    (timestamp("2024-03-31T01:00:00Z"), offset(7200)),
+                    (timestamp("2024-10-27T01:00:00Z"), offset(3600)),
+                ],
+            },
+        };
+        for (utc, local) in [
+            ("2024-03-31T00:59:59Z", "2024-03-31T01:59:59+01:00"),
+            ("2024-03-31T01:00:00Z", "2024-03-31T03:00:00+02:00"),
+            ("2024-03-31T01:00:01Z", "2024-03-31T03:00:01+02:00"),
+            ("2024-10-27T00:59:59Z", "2024-10-27T02:59:59+02:00"),
+            ("2024-10-27T01:00:00Z", "2024-10-27T02:00:00+01:00"),
+            ("2024-10-27T01:00:01Z", "2024-10-27T02:00:01+01:00"),
+        ] {
+            assert_eq!(
+                DateTime::parse_from_rfc3339(utc)
+                    .unwrap()
+                    .with_timezone(&zone)
+                    .to_rfc3339(),
+                local
+            );
+        }
+        for (local, expected) in [
+            ("2024-03-31T01:59:59", vec!["2024-03-31T00:59:59Z"]),
+            ("2024-03-31T02:00:00", vec![]),
+            ("2024-03-31T02:59:59", vec![]),
+            ("2024-03-31T03:00:00", vec!["2024-03-31T01:00:00Z"]),
+            ("2024-10-27T01:59:59", vec!["2024-10-26T23:59:59Z"]),
+            (
+                "2024-10-27T02:00:00",
+                vec!["2024-10-27T00:00:00Z", "2024-10-27T01:00:00Z"],
+            ),
+            (
+                "2024-10-27T02:59:59",
+                vec!["2024-10-27T00:59:59Z", "2024-10-27T01:59:59Z"],
+            ),
+            ("2024-10-27T03:00:00", vec!["2024-10-27T02:00:00Z"]),
+        ] {
+            let local = NaiveDateTime::parse_from_str(local, "%Y-%m-%dT%H:%M:%S").unwrap();
+            let actual = match zone.from_local_datetime(&local) {
+                LocalResult::None => vec![],
+                LocalResult::Single(dt) => vec![dt.timestamp()],
+                LocalResult::Ambiguous(first, second) => {
+                    vec![first.timestamp(), second.timestamp()]
+                }
+            };
+            assert_eq!(
+                actual,
+                expected.into_iter().map(timestamp).collect::<Vec<_>>(),
+                "{local}"
+            );
+        }
+    }
 
     /// This tests whether we can create a custom timezone with two
     /// spans that have different offsets.

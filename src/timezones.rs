@@ -78,17 +78,19 @@ fn parse_standard_tz(tzid: &str) -> Result<Tz, String> {
 pub fn parse_ical_timezones(
     calendar: &IcalCalendar,
     local_tz: &Tz,
+    evaluation_year: i32,
 ) -> Result<HashMap<String, CustomTz>, CalendarError> {
     calendar
         .timezones
         .iter()
-        .map(|vtimezone| parse_ical_timezone(vtimezone, local_tz))
+        .map(|vtimezone| parse_ical_timezone(vtimezone, local_tz, evaluation_year))
         .collect()
 }
 
 fn parse_ical_timezone(
     vtimezone: &IcalTimeZone,
     local_tz: &Tz,
+    evaluation_year: i32,
 ) -> Result<(String, CustomTz), CalendarError> {
     match find_property_value(&vtimezone.properties, "TZID") {
         Some(name) => {
@@ -96,7 +98,7 @@ fn parse_ical_timezone(
             let unescaped_name = unescape_string(&name.to_string());
             let timezone = CustomTz {
                 name: unescaped_name.clone(),
-                timespanset: parse_timespansets(vtimezone, local_tz)?, // pass on the error
+                timespanset: parse_timespansets(vtimezone, local_tz, evaluation_year)?, // pass on the error
             };
             log::debug!(
                 "Parsed custom timezone definition '{:?}' with '{:?}' spans",
@@ -121,6 +123,7 @@ fn parse_ical_timezone(
 fn parse_occurrences_from_timespan(
     properties: &[Property],
     local_tz: &Tz,
+    evaluation_year: i32,
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     let maybe_dtstart_prop = find_property(properties, "DTSTART");
     let maybe_rrule_prop = find_property(properties, "RRULE");
@@ -136,7 +139,7 @@ fn parse_occurrences_from_timespan(
         ];
         // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
         let event_as_string = properties_to_string(&rule_props);
-        let current_year = Local::now().year();
+        let current_year = evaluation_year;
         match event_as_string.parse::<RRuleSet>() {
             // We only take occurrences in a short interval around the current year since we are
             // only interested in current dates
@@ -207,6 +210,7 @@ fn parse_occurrences_from_timespan(
 fn parse_timespansets(
     vtimezone: &IcalTimeZone,
     local_tz: &Tz,
+    evaluation_year: i32,
 ) -> Result<FixedTimespanSet, CalendarError> {
     // convert the ical timezone transitions into our own struct
     let transitions: Vec<TimezoneTransition> = vtimezone
@@ -218,7 +222,7 @@ fn parse_timespansets(
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times
     let mut transition_points: Vec<TransitionPoint> = vec![];
     for (pos, transition) in transitions.iter().enumerate() {
-        match parse_occurrences_from_timespan(&transition.properties, local_tz) {
+        match parse_occurrences_from_timespan(&transition.properties, local_tz, evaluation_year) {
             Ok(occurrences) => {
                 for dt in occurrences {
                     transition_points.push(TransitionPoint {

@@ -40,6 +40,13 @@ jobs:
         for test_timezone in UTC Europe/Berlin Asia/Kolkata; do
           TZ="$test_timezone" cargo test --locked gui::timeline::tests
         done
+    - name: Check calendar compatibility across host timezones
+      run: |
+        for test_timezone in UTC Europe/Berlin America/New_York Asia/Kolkata; do
+          TZ="$test_timezone" cargo test --locked calendar_compatibility
+          TZ="$test_timezone" cargo test --locked custom_timezone::tests
+          TZ="$test_timezone" cargo test --locked timezones::tests
+        done
     - name: Desktop smoke tests
       timeout-minutes: 5
       run: |

@@ -315,31 +315,17 @@ fn strip_param(p: &Property, param_name: &str) -> (Property, Option<String>) {
     (new_prop, removed_param_value)
 }
 
-/// This function will parse occurrences from an ical event by using the rrule library to expand
-/// the various rule definitions into concrete DateTimes representing recurring instances
-///
-/// There are 3 relevant properties: RRULE, DTSTART and EXDATE
-/// Since the rrule lib can only deal with UTC (and maybe local dates) we need to convert any
-/// local dates to UTC first and feed rrule the modified DTSTART and EXDATE properties.
-/// According to https://tools.ietf.org/html/rfc5545#section-3.3.10 the UNTIL part of the RRULE
-/// is either a DATE-TIME or a DATE, depending on how DTSTART is defined. The following cases can occur:
-/// - If DTSTART is a DATE then rrule is fine and UNTIL is also a DATE
-///   -> In case of dates we can NOT convert any dates, we need to just take them and apply the local
-///      timezone to them (otherwise we might shift into a different day). We do need to strip the TZID
-///      before we send to rrule.
-/// - If DTSTART is a local DATE-TIME (e.g. 20200101T101010 (no Z)) then the UNTIL is also a local time
-///   -> We can't correctly handle "local" datetimes yet since we don't know what the local timezone of
-///      the calendar is. We should throw an error here (!?)
-/// - If DTSTART is a UTC DATE-TIME (e.g. 20200101T101010Z (with a Z)) then the UNTIL is also UTC
-///   -> This is easy: we just convert all generated occurrences to the local timezone from UTC
-/// - If DTSTART is a DATE-TIME with a Timezone identifier, then UNTIL is in UTC (WTF people)
-///   -> In this case we need to convert the EXDATE and DTSTART to UTC, feed that together with
-///      the original RRULE to the library and save the timzone we identified in DTSTART.
-///      We then convert all occurrences to the local timezone from UTC.
+/// Expand RRULE, DTSTART and EXDATE within the evaluation year +/- one year.
+/// DATE values retain their calendar date in the display timezone; UTC values
+/// represent instants. Floating recurring datetimes are currently unsupported.
+/// For TZID values, expand wall-clock fields with TZID stripped and UNTIL
+/// converted to the source timezone, then resolve each occurrence through the
+/// original timezone. This preserves meeting wall times across DST changes.
 fn parse_occurrences(
     properties: &[Property],
     custom_timezones: &HashMap<String, CustomTz>,
     local_tz: &Tz,
+    current_year: i32,
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     // if no DTSTART or RRULE is present we can't do anything and assume we can't calculate occurrences
     let maybe_dtstart_prop = find_property(properties, "DTSTART");
@@ -384,12 +370,10 @@ fn parse_occurrences(
         stripped_exdate = strip_param(exdate_prop, "TZID").0;
         rule_props.push(stripped_exdate);
     }
-    // need to do this silly conversion as otherwise the with_timezone call below doesn't work correctly
-    let current_year = Local::now().year();
+    // Apply the same fixed evaluation window in every recurrence branch.
     let skip_occurrence_pred = |d: &DateTime<Tz>| d.year() < (current_year - 1);
     let take_occurrence_pred =
         |d: &DateTime<Tz>| d.year() >= (current_year - 1) && d.year() <= (current_year + 1);
-    //let take_occurrence_pred =
     // Case 1: DTSTART is a DATE
     if all_day_event {
         rule_props.push(rrule_prop.clone());
@@ -690,9 +674,21 @@ pub fn extract_events(
     local_tz: &Tz,
     use_zoommtg: bool,
 ) -> Result<Vec<Event>, CalendarError> {
+    extract_events_for_year(text, local_tz, use_zoommtg, Local::now().year())
+}
+
+/// Use one evaluation year for both event expansion (year - 1 through year + 1)
+/// and timezone transitions (year - 2 through year + 1). Keeping the clock at
+/// the public entry point makes historical calendar fixtures reproducible.
+fn extract_events_for_year(
+    text: &str,
+    local_tz: &Tz,
+    use_zoommtg: bool,
+    evaluation_year: i32,
+) -> Result<Vec<Event>, CalendarError> {
     match parse_calendar(text)? {
         Some(calendar) => {
-            let calendar_timezones = parse_ical_timezones(&calendar, local_tz)?;
+            let calendar_timezones = parse_ical_timezones(&calendar, local_tz, evaluation_year)?;
             let event_tuples = parse_events(calendar, &calendar_timezones, local_tz, use_zoommtg)?;
             // Events are either normal events (potentially recurring) or they are modifying events
             // that defines exceptions to recurrences of other events. We need to split these types out
@@ -702,7 +698,12 @@ pub fn extract_events(
             non_modifying_events
                 .into_iter()
                 .map(|(ical_event, parsed_event)| {
-                    match parse_occurrences(&ical_event.properties, &calendar_timezones, local_tz) {
+                    match parse_occurrences(
+                        &ical_event.properties,
+                        &calendar_timezones,
+                        local_tz,
+                        evaluation_year,
+                    ) {
                         Ok(occurrences) => {
                             if occurrences.is_empty() {
                                 Ok(vec![parsed_event])
@@ -729,6 +730,10 @@ pub fn extract_events(
         None => Ok(vec![]),
     }
 }
+
+#[cfg(test)]
+#[path = "calendar_compatibility_tests.rs"]
+mod calendar_compatibility;
 
 #[cfg(test)]
 mod tests {
