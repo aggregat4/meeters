@@ -202,3 +202,155 @@ fn exchange_transition_instant() {
         assert_eq!(actual.to_rfc3339(), expected);
     }
 }
+
+calendar_case!(
+    spring_gap,
+    UTC,
+    false,
+    [
+        "2024-03-24T01:30:00Z",
+        "2024-03-31T01:30:00Z",
+        "2024-04-07T00:30:00Z"
+    ]
+);
+calendar_case!(
+    autumn_fold,
+    UTC,
+    false,
+    [
+        "2024-10-20T00:30:00Z",
+        "2024-10-27T00:30:00Z",
+        "2024-11-03T01:30:00Z"
+    ]
+);
+calendar_case!(
+    custom_spring_gap,
+    UTC,
+    false,
+    [
+        "2024-03-24T01:30:00Z",
+        "2024-03-31T01:30:00Z",
+        "2024-04-07T00:30:00Z"
+    ]
+);
+calendar_case!(
+    custom_autumn_fold,
+    UTC,
+    false,
+    [
+        "2024-10-20T00:30:00Z",
+        "2024-10-27T00:30:00Z",
+        "2024-11-03T01:30:00Z"
+    ]
+);
+calendar_case!(
+    mixed_exdates,
+    UTC,
+    false,
+    ["2024-03-24T08:00:00Z", "2024-04-21T07:00:00Z"]
+);
+calendar_case!(all_excluded, UTC, false, []);
+calendar_case!(
+    single_observance,
+    UTC,
+    false,
+    ["2024-03-24T03:30:00Z", "2024-03-31T03:30:00Z"]
+);
+calendar_case!(
+    abolished_dst,
+    UTC,
+    false,
+    [
+        "2024-03-24T01:30:00Z",
+        "2024-03-31T01:30:00Z",
+        "2024-04-07T01:30:00Z"
+    ]
+);
+calendar_case!(
+    observance_rdates,
+    UTC,
+    false,
+    [
+        "2024-03-24T01:30:00Z",
+        "2024-03-31T01:30:00Z",
+        "2024-04-07T00:30:00Z"
+    ]
+);
+
+#[test]
+fn observance_rdate_lists_and_repeated_properties_cover_both_years() {
+    let calendar = parse_calendar(include_str!(
+        "../tests/fixtures/calendars/observance_rdates.ics"
+    ))
+    .unwrap()
+    .unwrap();
+    let zones = parse_ical_timezones(&calendar, 2024).unwrap();
+    let zone = &zones["Rdates"];
+    for (utc, expected) in [
+        ("2024-10-27T01:00:00Z", "2024-10-27T02:00:00+01:00"),
+        ("2025-03-30T01:00:00Z", "2025-03-30T03:00:00+02:00"),
+        ("2025-10-26T01:00:00Z", "2025-10-26T02:00:00+01:00"),
+    ] {
+        assert_eq!(
+            DateTime::parse_from_rfc3339(utc)
+                .unwrap()
+                .with_timezone(zone)
+                .to_rfc3339(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn explicit_gap_and_fold_values_use_the_same_policy_as_recurrences() {
+    for (local, expected) in [
+        ("20240331T023000", "2024-03-31T01:30:00Z"),
+        ("20241027T023000", "2024-10-27T00:30:00Z"),
+    ] {
+        let actual =
+            parse_ical_datetime(local, &Left(chrono_tz::Europe::Berlin), &UTC, "DTSTART").unwrap();
+        assert_eq!(
+            actual.timestamp(),
+            DateTime::parse_from_rfc3339(expected).unwrap().timestamp()
+        );
+    }
+    // Lord Howe jumps only 30 minutes; do not assume all gaps last an hour.
+    let actual = parse_ical_datetime(
+        "20241006T021500",
+        &Left(chrono_tz::Australia::Lord_Howe),
+        &UTC,
+        "DTSTART",
+    )
+    .unwrap();
+    assert_eq!(actual.to_rfc3339(), "2024-10-05T15:45:00+00:00");
+}
+
+#[test]
+fn exclusion_in_second_fold_does_not_remove_first_fold_occurrence() {
+    let text = include_str!("../tests/fixtures/calendars/autumn_fold.ics")
+        .replace("END:VEVENT", "EXDATE:20241027T013000Z\nEND:VEVENT");
+    check_calendar(
+        &text,
+        &[
+            "2024-10-20T00:30:00Z",
+            "2024-10-27T00:30:00Z",
+            "2024-11-03T01:30:00Z",
+        ],
+        UTC,
+        false,
+    );
+    let text = text.replace("20241027T013000Z", "20241027T003000Z");
+    check_calendar(
+        &text,
+        &["2024-10-20T00:30:00Z", "2024-11-03T01:30:00Z"],
+        UTC,
+        false,
+    );
+}
+
+#[test]
+fn empty_observances_return_an_error_instead_of_panicking() {
+    let text = "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Empty\nEND:VTIMEZONE\nEND:VCALENDAR\n";
+    let error = extract_events_for_year(text, &UTC, false, 2024).unwrap_err();
+    assert!(error.msg.contains("no observances"));
+}

@@ -39,6 +39,41 @@ fn first_param_value<'a>(prop: &'a Property, param_name: &str) -> Option<&'a str
         .map(String::as_str)
 }
 
+/// RFC 5545 section 3.3.5 and verified erratum 4271: choose the first
+/// occurrence in a fold; interpret a gap using the offset before the jump.
+fn resolve_calendar_datetime<T: TimeZone>(
+    tz: &T,
+    local: &NaiveDateTime,
+    context: &str,
+) -> Result<DateTime<T>, CalendarError> {
+    match tz.from_local_datetime(local) {
+        LocalResult::Single(dt) => Ok(dt),
+        LocalResult::Ambiguous(a, b) => Ok(a.min(b)),
+        LocalResult::None => {
+            // Chrono offsets are strictly less than 24h in magnitude, so a
+            // forward jump cannot skip 48h. Search only on the exceptional path.
+            for seconds in 1..=172800 {
+                let Some(before) = local.checked_sub_signed(Duration::seconds(seconds)) else {
+                    break;
+                };
+                if let Some(dt) = tz.from_local_datetime(&before).latest() {
+                    let utc = local
+                        .checked_sub_signed(Duration::seconds(i64::from(
+                            dt.offset().fix().local_minus_utc(),
+                        )))
+                        .ok_or_else(|| {
+                            calendar_error(format!("datetime out of range: {context}"))
+                        })?;
+                    return Ok(tz.from_utc_datetime(&utc));
+                }
+            }
+            Err(calendar_error(format!(
+                "cannot resolve local datetime: {context}"
+            )))
+        }
+    }
+}
+
 fn single_local_datetime<T: TimeZone>(
     result: LocalResult<DateTime<T>>,
     context: &str,
@@ -83,13 +118,15 @@ fn parse_ical_datetime<T: TimeZone>(
 ) -> Result<DateTime<T>, CalendarError> {
     match NaiveDateTime::parse_from_str(datetime, "%Y%m%dT%H%M%S") {
         Ok(d) => match tz {
-            Either::Left(source_tz) => single_local_datetime(
-                source_tz.from_local_datetime(&d),
+            Either::Left(source_tz) => resolve_calendar_datetime(
+                source_tz,
+                &d,
                 &format!("{} datetime {}", context, datetime),
             )
             .map(|datetime| datetime.with_timezone(target_tz)),
-            Either::Right(source_tz) => single_local_datetime(
-                source_tz.from_local_datetime(&d),
+            Either::Right(source_tz) => resolve_calendar_datetime(
+                *source_tz,
+                &d,
                 &format!("{} datetime {}", context, datetime),
             )
             .map(|datetime| datetime.with_timezone(target_tz)),
@@ -327,6 +364,30 @@ fn parse_occurrences(
     local_tz: &Tz,
     current_year: i32,
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
+    let mut occurrences = expand_occurrences(properties, custom_timezones, local_tz, current_year)?;
+    let mut exclusions = HashSet::new();
+    for prop in properties.iter().filter(|p| p.name == "EXDATE") {
+        for value in property_value(prop, "EXDATE")?.split(',') {
+            let mut single = prop.clone();
+            single.value = Some(value.into());
+            let date = if is_ical_date(&single) {
+                extract_ical_date(&single, local_tz)?
+            } else {
+                extract_ical_datetime(&single, custom_timezones, local_tz)?
+            };
+            exclusions.insert(date.timestamp());
+        }
+    }
+    occurrences.retain(|d| !exclusions.contains(&d.timestamp()));
+    Ok(occurrences)
+}
+
+fn expand_occurrences(
+    properties: &[Property],
+    custom_timezones: &HashMap<String, CustomTz>,
+    local_tz: &Tz,
+    current_year: i32,
+) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     // if no DTSTART or RRULE is present we can't do anything and assume we can't calculate occurrences
     let maybe_dtstart_prop = find_property(properties, "DTSTART");
     let maybe_rrule_prop = find_property(properties, "RRULE");
@@ -359,17 +420,11 @@ fn parse_occurrences(
     };
     let rrule_prop =
         maybe_rrule_prop.ok_or_else(|| calendar_error("missing RRULE property after detection"))?;
-    let maybe_exdate_prop = find_property(properties, "EXDATE");
     let all_day_event = is_ical_date(dtstart_prop);
-    // Prepare a vec of all relevant rrule properties for rrule to work on by stripping tzid parameters
+    // Expand DTSTART/RRULE only; exclusions are resolved to instants afterwards.
     let mut rule_props = vec![];
     let (stripped_dtstart, _) = strip_param(dtstart_prop, "TZID");
     rule_props.push(stripped_dtstart);
-    let stripped_exdate; // need to define that here otherwise in the inside if scope it will go out of scope
-    if let Some(exdate_prop) = maybe_exdate_prop {
-        stripped_exdate = strip_param(exdate_prop, "TZID").0;
-        rule_props.push(stripped_exdate);
-    }
     // Apply the same fixed evaluation window in every recurrence branch.
     let skip_occurrence_pred = |d: &DateTime<Tz>| d.year() < (current_year - 1);
     let take_occurrence_pred =
@@ -425,7 +480,7 @@ fn parse_occurrences(
         }
     } else if let Some(original_tz) = maybe_original_tz {
         // CASE 4: we have a timestamp with a timezone identifier
-        // We strip the tz from the DTSTART and EXDATE and let rrule just regard them as naked timestamps
+        // Strip TZID from DTSTART and let rrule expand its wall-clock fields.
         // We do need to manually convert the UNTIL parameter of the RRULE to the original TZ since that
         // will always be UTC and if don't convert we can miss the last meeting of the interval
         //
@@ -497,13 +552,15 @@ fn parse_occurrences(
                         )?;
                     let original_datetime = &NaiveDateTime::new(original_date, original_time);
                     match &original_tz {
-                        Either::Left(original_tz) => single_local_datetime(
-                            original_tz.from_local_datetime(original_datetime),
+                        Either::Left(original_tz) => resolve_calendar_datetime(
+                            original_tz,
+                            original_datetime,
                             "RRULE occurrence",
                         )
                         .map(|datetime| datetime.with_timezone(local_tz)),
-                        Either::Right(original_tz) => single_local_datetime(
-                            original_tz.from_local_datetime(original_datetime),
+                        Either::Right(original_tz) => resolve_calendar_datetime(
+                            *original_tz,
+                            original_datetime,
                             "RRULE occurrence",
                         )
                         .map(|datetime| datetime.with_timezone(local_tz)),
@@ -705,7 +762,9 @@ fn extract_events_for_year(
                         evaluation_year,
                     ) {
                         Ok(occurrences) => {
-                            if occurrences.is_empty() {
+                            if occurrences.is_empty()
+                                && find_property(&ical_event.properties, "RRULE").is_none()
+                            {
                                 Ok(vec![parsed_event])
                             } else {
                                 calculate_occurrences(

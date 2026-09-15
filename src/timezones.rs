@@ -110,25 +110,34 @@ fn parse_ical_timezone(
     }
 }
 
-/// We assume there is no TZ identifier with timespan DTSTARTS
-/// This is in the spec. See https://icalendar.org/iCalendar-RFC-5545/3-6-5-time-zone-component.html
-/// "DTSTART" in this usage MUST be specified as a date with a local time value."
-///
-/// Additionally we move the starting year forward to 2 years before now since we are not interested
-/// in historical events and typical VTIMEZONE definitions start many hundreds of years in the past.
-/// This allows us to generate many fewer timespansets and preserve memory and performance.
+/// Expand local observance onsets (DTSTART, RRULE and RDATE), retaining
+/// the evaluation window and the latest preceding onset. UNTIL uses UTC.
 fn parse_occurrences_from_timespan(
     properties: &[Property],
     current_year: i32,
     offset_from: i32,
 ) -> Result<Vec<NaiveDateTime>, CalendarError> {
-    let maybe_dtstart_prop = find_property(properties, "DTSTART");
-    let maybe_rrule_prop = find_property(properties, "RRULE");
-    if maybe_dtstart_prop.is_none() {
-        return Err(CalendarError {
-            msg: "Invalid definition for timespan, missing DTSTART".to_string(),
-        });
+    let parse_local = |value: &str| {
+        NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S").map_err(|e| CalendarError {
+            msg: format!("Invalid observance date {value:?}: {e}"),
+        })
+    };
+    let start = find_property(properties, "DTSTART").ok_or_else(|| CalendarError {
+        msg: "Invalid definition for timespan, missing DTSTART".into(),
+    })?;
+    let start_value = start.value.as_deref().ok_or_else(|| CalendarError {
+        msg: "Missing observance DTSTART value".into(),
+    })?;
+    let mut dates = vec![parse_local(start_value)?];
+    for prop in properties.iter().filter(|p| p.name == "RDATE") {
+        let value = prop.value.as_deref().ok_or_else(|| CalendarError {
+            msg: "Missing observance RDATE value".into(),
+        })?;
+        for value in value.split(',') {
+            dates.push(parse_local(value)?);
+        }
     }
+    let maybe_rrule_prop = find_property(properties, "RRULE");
     if maybe_rrule_prop.is_some() {
         // The recurrence engine expands local fields. UNTIL is UTC in a
         // VTIMEZONE, so express it using the same pre-transition offset first.
@@ -163,78 +172,42 @@ fn parse_occurrences_from_timespan(
                 .collect::<Result<Vec<_>, CalendarError>>()?
                 .join(";"),
         );
-        let rule_props = vec![rule, maybe_dtstart_prop.unwrap().clone()];
+        let rule_props = vec![rule, start.clone()];
         // There is also no EXDATE as far as I can tell from the spec so we don't try to parse it
         let event_as_string = properties_to_string(&rule_props);
-        match event_as_string.parse::<RRuleSet>() {
-            // We only take occurrences in a short interval around the current year since we are
-            // only interested in current dates
-            Ok(ruleset) => {
-                let relevant_transitions: Vec<NaiveDateTime> = ruleset
-                    .clone()
-                    .into_iter()
-                    .skip_while(|d| d.year() < (current_year - 2))
-                    .take_while(|d| d.year() < (current_year + 2))
-                    .map(|d| d.naive_local())
-                    .collect();
-                if relevant_transitions.is_empty() {
-                    // There could be a case where there are no transitions around our current year.
-                    // For example for a country that dropped daylight savings at some point in the
-                    // past. For this case we return simply the last 4 transitions coming right
-                    // before the current year
-                    let all_transitions_before_now: Vec<NaiveDateTime> = ruleset
-                        .into_iter()
-                        .take_while(|d| d.year() < current_year)
-                        .map(|d| d.naive_local())
-                        .collect();
-                    Ok(all_transitions_before_now
-                        .into_iter()
-                        .rev()
-                        .take(4)
-                        .rev()
-                        .collect())
-                } else {
-                    Ok(relevant_transitions)
-                }
+        let ruleset = event_as_string
+            .parse::<RRuleSet>()
+            .map_err(|e| CalendarError {
+                msg: format!("error in RRULE parsing: {e}"),
+            })?;
+        // Keep the last onset before the window as well as onsets inside it.
+        // An ended observance still determines the offset until a later change.
+        let mut previous = None;
+        for dt in ruleset
+            .into_iter()
+            .take_while(|d| d.year() < current_year + 2)
+        {
+            if dt.year() < current_year - 2 {
+                previous = Some(dt.naive_local());
+            } else {
+                dates.push(dt.naive_local());
             }
-            Err(e) => Err(CalendarError {
-                msg: format!("error in RRULE parsing: {}", e),
-            }),
         }
-    } else {
-        // A timezone definition can also have no RRULE definition.
-        // In Exchange this will happen for UTC or other timezones that
-        // have no daylight savings. For example UTC-4, La Paz, Bolivia.
-        // According to the iCalendar spec this would also be possible
-        // for partial timezone definitions that are only valid within
-        // a certain period of time, but I am disregarding that use case for now.
-        // See also https://icalendar.org/iCalendar-RFC-5545/3-6-5-time-zone-component.html
-        let date_time_str = maybe_dtstart_prop.unwrap().value.as_ref().unwrap();
-        match NaiveDateTime::parse_from_str(date_time_str, "%Y%m%dT%H%M%S") {
-            Ok(dt) => Ok(vec![dt]),
-            Err(e) => Err(CalendarError {
-                msg: format!(
-                    "Could not parse DTSTART for timezone timespan with value {:?} and error: {:?}",
-                    date_time_str, e
-                ),
-            }),
-        }
+        dates.extend(previous);
     }
+    dates.retain(|d| d.year() < current_year + 2);
+    dates.sort();
+    dates.dedup();
+    // Exchange often supplies synthetic DTSTART anchors in 1601 for both
+    // observances. Retain only the latest onset before our window so those
+    // obsolete anchors cannot conflict with each other.
+    let before_window = dates.partition_point(|d| d.year() < current_year - 2);
+    dates.drain(..before_window.saturating_sub(1));
+    Ok(dates)
 }
 
-///
-/// We have two spans: standard and daylight savings. They both have:
-/// - a starting date
-/// - an RRULE for the transition day
-/// - an offset
-///
-/// We generate a sequence of switching dates for each span from the starting date until the year after this year
-/// We figure out what sequence is the initial sequence (earlier in the year) and which is the second sequence
-/// We generate a fake timespan for the beginning of time until the first switch day
-/// For each element in the EARLY sequence:
-///     Add a span for the early element
-///     Add a span for the corresponding late element
-///
+/// Merge any number of STANDARD/DAYLIGHT observances into a UTC timeline.
+/// The first retained onset's TZOFFSETFROM supplies the initial offset.
 fn parse_timespansets(
     vtimezone: &IcalTimeZone,
     evaluation_year: i32,
@@ -245,7 +218,11 @@ fn parse_timespansets(
         .iter()
         .map(parse_icaltimezonetransition)
         .collect::<Result<Vec<TimezoneTransition>, CalendarError>>()?; // collect moves the result to the outer scope and doing '?' will fail the operation at the first Err
-    assert_eq!(2, transitions.len());
+    if transitions.is_empty() {
+        return Err(CalendarError {
+            msg: "VTIMEZONE has no observances".into(),
+        });
+    }
     // generate all timestamps of all transition points for the available timestamps starting at the provided DTSTART times
     let mut transition_points: Vec<TransitionPoint> = vec![];
     for (pos, transition) in transitions.iter().enumerate() {
@@ -267,15 +244,27 @@ fn parse_timespansets(
         }
     }
     transition_points.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    // Identical onsets are common in fixed-offset Exchange definitions.
+    for pair in transition_points.windows(2) {
+        if pair[0].timestamp == pair[1].timestamp
+            && transitions[pair[0].transition_index].offsetto
+                != transitions[pair[1].transition_index].offsetto
+        {
+            return Err(CalendarError {
+                msg: "Conflicting timezone observances at the same instant".into(),
+            });
+        }
+    }
+    transition_points.dedup_by_key(|p| p.timestamp);
+    let initial_offset = transition_points
+        .first()
+        .map(|p| transitions[p.transition_index].offsetfrom)
+        .unwrap_or(transitions[0].offsetfrom);
     Ok(FixedTimespanSet {
-        // This synthetic fake first timespan models the time before the first
-        // transition point, these values are fake and should never be used
-        // The assumption is that the custom TZ starts defining transitions points
-        // at some distant time in the past and that we are fine with this
         first: FixedTimespan {
-            utc_offset: 0,
+            utc_offset: initial_offset,
             dst_offset: 0,
-            name: "", // name is irrelevant here
+            name: "",
         },
         rest: transition_points
             .iter()
