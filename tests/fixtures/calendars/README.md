@@ -109,7 +109,7 @@ the fix; its test also checks standard VALUE=DATE references.
 
 ## Comparing recurrence engines
 
-The end-to-end helpers now run each calendar with the fork and test-only upstream
+The end-to-end helpers now run each calendar with the test-only fork and production upstream
 0.14.0, compare complete event outputs, then apply the existing handwritten
 assertions. Direct timezone fixtures compare the transition tables too.
 See [RRULE_COMPARISON.md](RRULE_COMPARISON.md) for adapter decisions, the discovered

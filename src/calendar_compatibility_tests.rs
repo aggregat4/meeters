@@ -12,7 +12,7 @@ fn extract_events_for_year(
     year: i32,
 ) -> Result<Vec<Event>, CalendarError> {
     let fork = super::extract_events_with_engine(text, zone, zoom, year, Engine::Fork);
-    let upstream = super::extract_events_with_engine(text, zone, zoom, year, Engine::Upstream);
+    let upstream = super::extract_events_for_year(text, zone, zoom, year);
     match (&fork, &upstream) {
         (Ok(a), Ok(b)) => {
             assert_eq!(
@@ -566,4 +566,13 @@ fn all_day_exceptions_match_calendar_dates_in_every_display_timezone() {
             );
         }
     }
+}
+
+#[test]
+fn production_recurrence_returns_error_for_invalid_byday() {
+    let text = include_str!("../tests/fixtures/calendars/berlin_spring.ics")
+        .replace("COUNT=3", "COUNT=3;BYDAY=INVALID");
+    // Exercise the production default; the test-only fork panics on this input.
+    let error = super::extract_events_for_year(&text, &UTC, false, 2024).unwrap_err();
+    assert!(error.msg.contains("RRULE"));
 }

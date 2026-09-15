@@ -1,17 +1,15 @@
 //! Recurrence engines operate on calendar fields. Meeters owns timezone
 //! resolution, exclusions and overrides; UTC here is only a field carrier.
 use crate::domain::CalendarError;
-#[cfg(test)]
 use chrono::TimeZone;
 use chrono::{DateTime, Datelike};
 use chrono_tz::Tz;
-#[cfg(test)]
 use chrono_tz::UTC;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Engine {
-    Fork,
     #[cfg(test)]
+    Fork,
     Upstream,
 }
 
@@ -27,20 +25,20 @@ impl Engine {
             msg: format!("error in RRULE parsing: {e}"),
         };
         match self {
+            #[cfg(test)]
             Self::Fork => {
                 let set = input
-                    .parse::<rrule::RRuleSet>()
+                    .parse::<rrule_fork::RRuleSet>()
                     .map_err(|e| error(e.to_string()))?;
                 Ok(set
                     .into_iter()
                     .take_while(|d| d.year() < end_year)
                     .collect())
             }
-            #[cfg(test)]
             Self::Upstream => {
                 let input = upstream_input(input)?;
                 let set = input
-                    .parse::<rrule_upstream::RRuleSet>()
+                    .parse::<rrule::RRuleSet>()
                     .map_err(|e| error(e.to_string()))?;
                 Ok((&set)
                     .into_iter()
@@ -55,7 +53,6 @@ impl Engine {
 /// Upstream defaults floating dates to the host timezone. Explicit UTC avoids
 /// that: the fields are already in the source timezone, not real UTC instants.
 /// DATE values are represented as midnight, matching the fork's date expansion.
-#[cfg(test)]
 fn upstream_input(input: &str) -> Result<String, CalendarError> {
     fn stamp(value: &str) -> String {
         if value.len() == 8 {

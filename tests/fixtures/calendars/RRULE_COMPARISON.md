@@ -19,17 +19,18 @@ One known difference on malformed input is recorded separately:
 
 Error wording from the libraries is not a compatibility requirement. The
 malformed-BYDAY test catches the panic solely to characterize this difference;
-production does not catch or fix it in this change. This is an upstream
-improvement, not an occurrence mismatch.
+production now uses upstream and returns an error for this input. The panic
+remains only in the test-only reference fork.
 
 ## Versions and scope
 
-- Production: fork `rrule` 0.5.10, revision
+- Production: registry `rrule` **0.14.0**, exactly pinned behind the adapter.
+- Test-only reference: fork `rrule` 0.5.10 (alias `rrule_fork`), revision
   `44df30566e6b6ab7e1c98f59c03e413ec996a570`.
-- Candidate: registry `rrule` **0.14.0**, exactly pinned as the `rrule_upstream`
-  dev dependency. Its newer chrono-tz dependency is test-only.
-- Production still selects `Engine::Fork`; the Upstream variant only compiles
-  under `cfg(test)`.
+- Production selects `Engine::Upstream`; the Fork variant only compiles under
+  `cfg(test)`. Meeters continues to resolve zones with its existing chrono-tz
+  and custom timezone code; upstream's newer chrono-tz is used only for the
+  adapter's UTC field representation.
 - Synthetic fixtures evaluate 2024; the real Exchange export evaluates 2026.
 - Five historical recurrence regression inputs are compared in addition to the
   end-to-end calendar contracts.
@@ -47,7 +48,7 @@ These UTC values are field carriers; for local events they are not the meeting's
 actual UTC instant. DATE values become midnight, and UNTIL uses the same field
 representation. This also preserves the fork's handling of the legacy input
 that labels a datetime as VALUE=DATE. No arbitrary TZID mapping or new IANA
-rules are used by the candidate engine.
+rules are used for resolving events by the recurrence engine.
 
 The adapter iterates only to the exclusive end year used by the application,
 rather than calling `.all()` before filtering. Both engines are tested on an
@@ -63,11 +64,11 @@ for zone in UTC Europe/Berlin America/New_York Asia/Kolkata; do
   TZ="$zone" cargo test --locked calendar_compatibility
   TZ="$zone" cargo test --locked timezones::tests
 done
-cargo check --locked
-cargo tree --locked --edges normal -i rrule@0.14.0
+cargo build --locked --release
+cargo tree --locked --edges normal -i rrule@0.5.10
 ```
 
-The last command should report nothing: upstream is absent from the production
+The last command should report nothing: the fork is absent from the production
 dependency tree. Existing CI runs both test groups under all four host timezones.
 The real-calendar test additionally compares four display timezones.
 
@@ -80,5 +81,5 @@ the handwritten synthetic assertions remain important.
 
 Event RDATE, floating recurrence support, broader recurrence-rule combinations,
 pathological input limits and further real-world providers remain outside this
-comparison. See README.md for the remaining calendar coverage. No production
-switch is made by this work.
+comparison. See README.md for the remaining calendar coverage. The retained
+fork comparison continues to guard production upstream behavior.

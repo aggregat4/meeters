@@ -11,7 +11,7 @@ use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
 use regex::Regex;
 #[cfg(test)]
-use rrule::RRuleSet;
+use rrule_fork::RRuleSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -773,7 +773,13 @@ fn extract_events_for_year(
     use_zoommtg: bool,
     evaluation_year: i32,
 ) -> Result<Vec<Event>, CalendarError> {
-    extract_events_with_engine(text, local_tz, use_zoommtg, evaluation_year, Engine::Fork)
+    extract_events_with_engine(
+        text,
+        local_tz,
+        use_zoommtg,
+        evaluation_year,
+        Engine::Upstream,
+    )
 }
 
 fn extract_events_with_engine(

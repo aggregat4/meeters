@@ -79,7 +79,7 @@ pub fn parse_ical_timezones(
     calendar: &IcalCalendar,
     evaluation_year: i32,
 ) -> Result<HashMap<String, CustomTz>, CalendarError> {
-    parse_ical_timezones_with_engine(calendar, evaluation_year, Engine::Fork)
+    parse_ical_timezones_with_engine(calendar, evaluation_year, Engine::Upstream)
 }
 
 pub(crate) fn parse_ical_timezones_with_engine(
