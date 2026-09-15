@@ -354,3 +354,165 @@ fn empty_observances_return_an_error_instead_of_panicking() {
     let error = extract_events_for_year(text, &UTC, false, 2024).unwrap_err();
     assert!(error.msg.contains("no observances"));
 }
+
+#[test]
+fn sanitized_exchange_calendar_expands() {
+    let text = include_str!("../tests/fixtures/calendars/exchange_sanitized.ics");
+    let calendar = parse_calendar(text).unwrap().unwrap();
+    assert_eq!(calendar.events.len(), 231);
+    assert_eq!(calendar.timezones.len(), 1);
+    assert_eq!(
+        calendar
+            .events
+            .iter()
+            .filter(|e| find_property(&e.properties, "RRULE").is_some())
+            .count(),
+        50
+    );
+    assert_eq!(
+        calendar
+            .events
+            .iter()
+            .filter(|e| find_property(&e.properties, "RECURRENCE-ID").is_some())
+            .count(),
+        57
+    );
+    // Independently enumerated first Wednesdays, excluding July/August.
+    // The June occurrence is moved to June 17 (Event 0025).
+    let expected = [
+        "2026-09-02T14:30:00Z",
+        "2026-10-07T14:30:00Z",
+        "2026-11-04T15:30:00Z",
+        "2026-12-02T15:30:00Z",
+        "2027-01-06T15:30:00Z",
+        "2027-02-03T15:30:00Z",
+        "2027-03-03T15:30:00Z",
+    ];
+    let mut baseline = None;
+    for zone in [
+        UTC,
+        chrono_tz::Europe::Berlin,
+        chrono_tz::America::New_York,
+        chrono_tz::Asia::Kolkata,
+    ] {
+        let events = extract_events_for_year(text, &zone, false, 2026).unwrap();
+        let series: Vec<_> = events
+            .iter()
+            .filter(|e| e.summary == "Event 0002")
+            .collect();
+        assert_eq!(series.len(), expected.len());
+        for (event, expected) in series.iter().zip(expected) {
+            assert_eq!(
+                event.start_timestamp.timestamp(),
+                DateTime::parse_from_rfc3339(expected).unwrap().timestamp()
+            );
+            assert_eq!(
+                (event.end_timestamp - event.start_timestamp).num_minutes(),
+                60
+            );
+        }
+        let moved: Vec<_> = events
+            .iter()
+            .filter(|e| e.summary == "Event 0025")
+            .collect();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(
+            moved[0].start_timestamp.timestamp(),
+            DateTime::parse_from_rfc3339("2026-06-17T14:30:00Z")
+                .unwrap()
+                .timestamp()
+        );
+        // All-day series 0001 excludes July/August and moves June 3 to June 17.
+        let all_day: Vec<_> = events
+            .iter()
+            .filter(|e| e.summary == "Event 0001")
+            .collect();
+        assert!(!all_day.is_empty());
+        for event in all_day {
+            assert!(!["2026-06-03", "2026-07-01", "2026-08-05"].contains(
+                &event
+                    .start_timestamp
+                    .format("%Y-%m-%d")
+                    .to_string()
+                    .as_str()
+            ));
+        }
+        let moved_day: Vec<_> = events
+            .iter()
+            .filter(|e| e.summary == "Event 0014")
+            .collect();
+        assert_eq!(moved_day.len(), 1);
+        assert_eq!(
+            moved_day[0].start_timestamp.format("%Y-%m-%d").to_string(),
+            "2026-06-17"
+        );
+        // A display timezone may change an all-day event's instant, but never
+        // its nominal dates or the set of events. Timed instants must not change.
+        let normalized: Vec<_> = events
+            .iter()
+            .map(|e| {
+                (
+                    e.summary.clone(),
+                    e.all_day,
+                    if e.all_day {
+                        e.start_timestamp.format("%Y-%m-%d").to_string()
+                    } else {
+                        e.start_timestamp.with_timezone(&UTC).to_rfc3339()
+                    },
+                    if e.all_day {
+                        e.end_timestamp.format("%Y-%m-%d").to_string()
+                    } else {
+                        e.end_timestamp.with_timezone(&UTC).to_rfc3339()
+                    },
+                )
+            })
+            .collect();
+        if let Some(ref expected) = baseline {
+            assert_eq!(&normalized, expected, "display timezone {zone}");
+        } else {
+            baseline = Some(normalized);
+        }
+    }
+}
+
+#[test]
+fn all_day_exceptions_match_calendar_dates_in_every_display_timezone() {
+    let exchange = include_str!("../tests/fixtures/calendars/all_day_exchange_exceptions.ics");
+    let standard = exchange
+        .replace(
+            ";TZID=Europe/Berlin:20260604T000000",
+            ";VALUE=DATE:20260604",
+        )
+        .replace(
+            ";TZID=Europe/Berlin:20260603T000000",
+            ";VALUE=DATE:20260603",
+        );
+    for text in [exchange, standard.as_str()] {
+        for zone in [
+            UTC,
+            chrono_tz::Europe::Berlin,
+            chrono_tz::America::New_York,
+            chrono_tz::Asia::Kolkata,
+        ] {
+            let events = extract_events_for_year(text, &zone, false, 2026).unwrap();
+            let dates: Vec<_> = events
+                .iter()
+                .map(|e| {
+                    (
+                        e.start_timestamp.format("%Y-%m-%d").to_string(),
+                        e.end_timestamp.format("%Y-%m-%d").to_string(),
+                        e.all_day,
+                    )
+                })
+                .collect();
+            assert_eq!(
+                dates,
+                [
+                    ("2026-06-10".into(), "2026-06-11".into(), true),
+                    ("2026-06-05".into(), "2026-06-06".into(), true),
+                    ("2026-06-06".into(), "2026-06-07".into(), true)
+                ]
+            );
+        }
+    }
+}

@@ -8,7 +8,8 @@ cargo test --locked custom_timezone::tests
 cargo test --locked timezones::tests
 ```
 
-The `.ics` files are synthetic and contain no personal calendar data. Assertions
+Most `.ics` files are synthetic. `exchange_sanitized.ics` is a user-reviewed,
+sanitized real Exchange export; see its provenance below. Assertions
 live in `src/calendar_compatibility_tests.rs`. They exercise calendar parsing,
 timezone lookup/construction, recurrence expansion, exclusions and overrides
 through `extract_events_for_year`, with a fixed evaluation year of **2024**.
@@ -83,3 +84,25 @@ fork. Extend it with anonymized real Exchange calendars and contracts for:
 For a candidate library, run the same contracts and investigate every difference.
 Keep intended behavior fixes distinct from regressions; the fork is a comparison
 baseline, not an oracle.
+
+## Sanitized real Exchange export
+
+`exchange_sanitized.ics` was added with the owner's approval after review.
+It contains 231 VEVENT components, 175 distinct synthetic UIDs, 50 event RRULEs,
+57 RECURRENCE-ID components and one embedded timezone. Titles and identifiers
+were replaced, and descriptions, locations and nonessential metadata removed.
+Dates, recurrence patterns and offsets are retained intentionally. No original
+calendar, source URL or identifier mapping is included.
+
+The full fixture runs through `extract_events_for_year` with evaluation year 2026.
+Tests independently enumerate a monthly timed series spanning DST, verify a moved
+instance and all-day exclusions/overrides, and compare all normalized outputs
+across four display timezones. This is not an independently verified snapshot of
+every occurrence; it complements the small exact-output synthetic contracts.
+The test lives in `calendar_compatibility`, so the host-timezone CI matrix also
+runs it. Production does not read the fixture.
+
+This export exposed Exchange all-day EXDATE and RECURRENCE-ID values encoded as
+TZID-qualified local midnight. These now match the nominal calendar date instead
+of an instant in the display timezone. `all_day_exchange_exceptions.ics` isolates
+the fix; its test also checks standard VALUE=DATE references.

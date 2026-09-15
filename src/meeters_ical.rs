@@ -352,6 +352,24 @@ fn strip_param(p: &Property, param_name: &str) -> (Property, Option<String>) {
     (new_prop, removed_param_value)
 }
 
+/// Exchange may reference an all-day instance using a timezone-qualified
+/// midnight rather than VALUE=DATE. Match its nominal date, not its instant.
+fn all_day_reference_date(prop: &Property) -> Result<NaiveDate, CalendarError> {
+    let value = property_value(prop, &prop.name)?;
+    let date = if is_ical_date(prop) {
+        value
+    } else {
+        value.strip_suffix("T000000").ok_or_else(|| {
+            calendar_error(format!(
+                "expected a date or local midnight for all-day {}",
+                prop.name
+            ))
+        })?
+    };
+    NaiveDate::parse_from_str(date, "%Y%m%d")
+        .map_err(|e| calendar_error(format!("invalid all-day {}: {e}", prop.name)))
+}
+
 /// Expand RRULE, DTSTART and EXDATE within the evaluation year +/- one year.
 /// DATE values retain their calendar date in the display timezone; UTC values
 /// represent instants. Floating recurring datetimes are currently unsupported.
@@ -365,11 +383,17 @@ fn parse_occurrences(
     current_year: i32,
 ) -> Result<Vec<DateTime<Tz>>, CalendarError> {
     let mut occurrences = expand_occurrences(properties, custom_timezones, local_tz, current_year)?;
+    let all_day = find_property(properties, "DTSTART").is_some_and(is_ical_date);
+    let mut excluded_dates = HashSet::new();
     let mut exclusions = HashSet::new();
     for prop in properties.iter().filter(|p| p.name == "EXDATE") {
         for value in property_value(prop, "EXDATE")?.split(',') {
             let mut single = prop.clone();
             single.value = Some(value.into());
+            if all_day {
+                excluded_dates.insert(all_day_reference_date(&single)?);
+                continue;
+            }
             let date = if is_ical_date(&single) {
                 extract_ical_date(&single, local_tz)?
             } else {
@@ -378,7 +402,9 @@ fn parse_occurrences(
             exclusions.insert(date.timestamp());
         }
     }
-    occurrences.retain(|d| !exclusions.contains(&d.timestamp()));
+    occurrences.retain(|d| {
+        !exclusions.contains(&d.timestamp()) && !excluded_dates.contains(&d.date_naive())
+    });
     Ok(occurrences)
 }
 
@@ -601,7 +627,11 @@ fn partition_modifying_events(
         // presence of a RECURRENCE-ID property is the trigger to know this is a modifying event
         if let Some(recurrence_id_property) = find_property(&ical_event.properties, "RECURRENCE-ID")
         {
-            extract_ical_datetime(recurrence_id_property, calendar_timezones, local_tz)?;
+            if is_ical_date(recurrence_id_property) {
+                extract_ical_date(recurrence_id_property, local_tz)?;
+            } else {
+                extract_ical_datetime(recurrence_id_property, calendar_timezones, local_tz)?;
+            }
             let uid = find_property_value(&ical_event.properties, "UID").ok_or_else(|| {
                 calendar_error(format!(
                     "missing UID for modifying event '{}'",
@@ -695,12 +725,17 @@ fn calculate_occurrences(
                                     modifying_event.summary
                                 ))
                             })?;
-                    let recurrence_datetime = extract_ical_datetime(
-                        recurrence_id_property,
-                        calendar_timezones,
-                        local_tz,
-                    )?;
-                    if *datetime == recurrence_datetime {
+                    let matches = if parsed_event.all_day {
+                        datetime.date_naive() == all_day_reference_date(recurrence_id_property)?
+                    } else {
+                        *datetime
+                            == extract_ical_datetime(
+                                recurrence_id_property,
+                                calendar_timezones,
+                                local_tz,
+                            )?
+                    };
+                    if matches {
                         // the modifying event has the same UID as our event and it has the same timestamp, so we return the modification instead
                         return Ok(modifying_event.clone());
                     }
