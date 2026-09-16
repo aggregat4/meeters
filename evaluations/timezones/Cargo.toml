@@ -1,0 +1,24 @@
+[package]
+name = "meeters-timezone-evaluation"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "meeters-timezone-evaluation"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+chrono = "0.4"
+chrono-tz = "=0.5.3"
+chrono_tz_new = { package = "chrono-tz", version = "=0.10.4" }
+jiff = "=0.2.37"
+tz-rs = "=0.7.3"
+tzfile = "=0.1.3"
+ical = "0.11"
+either = "1.8"
+log = "0.4"
+roxmltree = "0.20"
+rrule = "=0.14.0"

@@ -1,0 +1,21 @@
+CUSTOM PASS: 12 zones, 349 UTC samples, 943 local candidate samples, 31 gap-policy samples; CustomTz/Jiff/tz-rs/tzfile agree
+chrono-tz 0.10.4 embedded tzdb: 2025b
+IANA difference: tzfile Europe/Berlin 2050-07-15T12:00:00Z: 3600 vs system TZif 7200
+IANA difference: tzfile America/New_York 2050-07-15T12:00:00Z: -18000 vs system TZif -14400
+IANA difference: tzfile Australia/Lord_Howe 2050-07-15T12:00:00Z: 39600 vs system TZif 37800
+IANA difference: chrono-tz-0.5.3 Pacific/Apia 2024-01-15T12:00:00Z: 50400 vs system TZif 46800
+IANA difference: chrono-tz-0.5.3 America/Mexico_City 2024-07-15T12:00:00Z: -18000 vs system TZif -21600
+IANA difference: chrono-tz-0.5.3 America/Mexico_City 2026-07-15T12:00:00Z: -18000 vs system TZif -21600
+IANA difference: chrono-tz-0.5.3 America/Mexico_City 2050-07-15T12:00:00Z: -18000 vs system TZif -21600
+IANA difference: chrono-tz-0.5.3 Asia/Almaty 2024-07-15T12:00:00Z: 21600 vs system TZif 18000
+IANA difference: chrono-tz-0.5.3 Asia/Almaty 2026-07-15T12:00:00Z: 21600 vs system TZif 18000
+IANA difference: chrono-tz-0.5.3 Asia/Almaty 2050-07-15T12:00:00Z: 21600 vs system TZif 18000
+IANA difference: chrono-tz-0.5.3 Africa/Cairo 2024-07-15T12:00:00Z: 7200 vs system TZif 10800
+IANA difference: chrono-tz-0.5.3 Africa/Cairo 2026-07-15T12:00:00Z: 7200 vs system TZif 10800
+IANA difference: chrono-tz-0.5.3 Africa/Cairo 2050-07-15T12:00:00Z: 7200 vs system TZif 10800
+IANA difference: tzfile Africa/Cairo 2050-07-15T12:00:00Z: 7200 vs system TZif 10800
+IANA: 32 instants, tz-rs agrees with Jiff on identical system TZif; 14 other differences
+offset lookup CustomTz: 26 ns/op (single release run, 100000 iterations)
+offset lookup jiff: 4 ns/op (single release run, 100000 iterations)
+offset lookup tz-rs: 4 ns/op (single release run, 100000 iterations)
+offset lookup tzfile: 5 ns/op (single release run, 100000 iterations)
