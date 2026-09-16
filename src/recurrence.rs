@@ -8,8 +8,6 @@ use chrono_tz::UTC;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Engine {
-    #[cfg(test)]
-    Fork,
     Upstream,
 }
 
@@ -25,16 +23,6 @@ impl Engine {
             msg: format!("error in RRULE parsing: {e}"),
         };
         match self {
-            #[cfg(test)]
-            Self::Fork => {
-                let set = input
-                    .parse::<rrule_fork::RRuleSet>()
-                    .map_err(|e| error(e.to_string()))?;
-                Ok(set
-                    .into_iter()
-                    .take_while(|d| d.year() < end_year)
-                    .collect())
-            }
             Self::Upstream => {
                 let input = upstream_input(input)?;
                 let set = input
@@ -107,23 +95,23 @@ mod tests {
 
     #[test]
     fn calendar_compatibility_legacy_regressions() {
-        for input in [
-            "DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO",
-            "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE",
-            "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE",
-            "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO",
-            "DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20221205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12",
+        for (input, count, first, last) in [
+            ("DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO", 39, "2020-08-12T00:00:00+00:00", "2021-05-05T00:00:00+00:00"),
+            ("DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE", 9, "2020-07-01T00:00:00+00:00", "2021-03-03T00:00:00+00:00"),
+            ("DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE", 8, "2020-12-30T13:00:00+00:00", "2021-07-28T13:00:00+00:00"),
+            ("DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO", 9, "2021-03-16T09:30:00+00:00", "2021-05-11T09:30:00+00:00"),
+            ("DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20221205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12", 1, "2021-12-06T00:00:00+00:00", "2021-12-06T00:00:00+00:00"),
         ] {
-            let fork = Engine::Fork.expand(input, 2024).unwrap();
-            let upstream = Engine::Upstream.expand(input, 2024).unwrap();
-            assert!(!fork.is_empty());
-            assert_eq!(fork, upstream, "legacy input: {input}");
+            let dates = Engine::Upstream.expand(input, 2024).unwrap();
+            assert_eq!(dates.len(), count, "{input}");
+            assert_eq!(dates.first().unwrap().to_rfc3339(), first, "{input}");
+            assert_eq!(dates.last().unwrap().to_rfc3339(), last, "{input}");
         }
     }
 
     #[test]
     fn calendar_compatibility_unending_rule_stops_at_window() {
-        for engine in [Engine::Fork, Engine::Upstream] {
+        for engine in [Engine::Upstream] {
             let dates = engine
                 .expand("DTSTART:20240101T090000Z\nRRULE:FREQ=YEARLY", 2027)
                 .unwrap();
@@ -145,7 +133,7 @@ mod tests {
             "DTSTART:20240101T090000Z\nRRULE:FREQ=INVALID",
             "DTSTART:invalid\nRRULE:FREQ=DAILY;COUNT=2",
         ] {
-            for engine in [Engine::Fork, Engine::Upstream] {
+            for engine in [Engine::Upstream] {
                 assert!(
                     engine.expand(input, 2027).is_err(),
                     "{engine:?} accepted {input}"
@@ -154,15 +142,8 @@ mod tests {
         }
     }
     #[test]
-    fn calendar_compatibility_known_invalid_byday_difference() {
+    fn calendar_compatibility_invalid_byday_returns_error() {
         let input = "DTSTART:20240101T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=INVALID;COUNT=2";
-        // Characterize a discovered difference; catching the fork panic is
-        // confined to this test, not added to production as an error policy.
-        let fork = std::panic::catch_unwind(|| Engine::Fork.expand(input, 2027));
-        assert!(
-            fork.is_err(),
-            "Update the comparison report if the fork is fixed"
-        );
         assert!(Engine::Upstream.expand(input, 2027).is_err());
     }
 }

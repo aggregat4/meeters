@@ -14,8 +14,8 @@ include = ["assets/*"]
 
 [dependencies]
 base64 = "0.23"
-chrono = "0.4"
-chrono-tz = "0.5"
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
 dbus = "0.9"
 dbus-crossroads = "0.5"
 directories = "6.0"
@@ -36,6 +36,3 @@ ureq = "3.4.1"
 async-channel = "2.1"
 html2text = "0.15"
 keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
-
-[dev-dependencies]
-rrule_fork = { package = "rrule", git = "https://github.com/aggregat4/rust-rrule", branch = "rrule-0.5" }

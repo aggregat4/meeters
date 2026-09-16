@@ -10,8 +10,6 @@ use either::{Either, Left};
 use ical::parser::ical::component::{IcalCalendar, IcalEvent};
 use ical::property::Property;
 use regex::Regex;
-#[cfg(test)]
-use rrule_fork::RRuleSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -849,44 +847,8 @@ mod calendar_compatibility;
 mod tests {
     use super::*;
 
-    // Fixed: https://github.com/fmeringdal/rust_rrule/issues/2
-    #[test]
-    fn rruleset_parsing_date() {
-        "DTSTART;VALUE=DATE:20200812\nRRULE:FREQ=WEEKLY;UNTIL=20210511T220000Z;INTERVAL=1;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
-    }
-
-    // New feature request: https://github.com/fmeringdal/rust_rrule/issues/3
-    // #[test]
-    // fn rruleset_parsing_date_with_timezone() {
-    //     "DTSTART;TZID=\"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna\":20201111T160000\nRRULE:FREQ=WEEKLY;UNTIL=20210428T140000Z;INTERVAL=6;BYDAY=WE;WKST=MO".parse::<RRuleSet>().unwrap();
-    // }
-
-    // https://github.com/fmeringdal/rust_rrule/issues/5
-    #[test]
-    fn rruleset_monthly_first_wednesday() {
-        "DTSTART;VALUE=DATE:20200701\nRRULE:FREQ=MONTHLY;UNTIL=20210303T090000Z;INTERVAL=1;BYDAY=1WE"
-            .parse::<RRuleSet>()
-            .unwrap()
-            .all();
-    }
-
-    #[test]
-    fn rrule_all_fails_with_panic() {
-        "DTSTART;VALUE=DATE:20201230T130000\nRRULE:FREQ=MONTHLY;UNTIL=20210825T120000Z;INTERVAL=1;BYDAY=-1WE".parse::<RRuleSet>().unwrap().all();
-    }
-
-    #[test]
-    fn rrule_all_missing_final_meeting() {
-        "DTSTART:20210316T093000Z\nRRULE:FREQ=WEEKLY;UNTIL=20210511T093000Z;INTERVAL=1;BYDAY=TU;WKST=MO"
-            .parse::<RRuleSet>()
-            .unwrap();
-    }
-
-    #[test]
-    fn rrule_invalid_by_month_value() {
-        // This used to fail with "invalid by_month value"
-        "DTSTART;VALUE=DATE:20211206\nRRULE:FREQ=YEARLY;UNTIL=20221205T230000Z;INTERVAL=1;BYMONTHDAY=6;BYMONTH=12".parse::<RRuleSet>().unwrap();
-    }
+    // Historical recurrence regressions are covered through the production
+    // adapter in recurrence::tests.
 
     #[test]
     fn test_zoom_url_conversion() {

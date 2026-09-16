@@ -328,16 +328,6 @@ dependencies = [
 
 [[package]]
 name = "chrono-tz"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2554a3155fec064362507487171dcc4edc3df60cb10f3a1fb10ed8094822b120"
-dependencies = [
- "chrono",
- "parse-zoneinfo",
-]
-
-[[package]]
-name = "chrono-tz"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
@@ -1178,12 +1168,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1284,7 +1268,7 @@ dependencies = [
  "async-channel",
  "base64",
  "chrono",
- "chrono-tz 0.5.3",
+ "chrono-tz",
  "dbus",
  "dbus-crossroads",
  "directories",
@@ -1301,8 +1285,7 @@ dependencies = [
  "notify-rust",
  "regex",
  "roxmltree",
- "rrule 0.14.0",
- "rrule 0.5.10",
+ "rrule",
  "ureq",
 ]
 
@@ -1561,15 +1544,6 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link 0.2.1",
-]
-
-[[package]]
-name = "parse-zoneinfo"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
-dependencies = [
- "regex",
 ]
 
 [[package]]
@@ -1848,24 +1822,12 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rrule"
-version = "0.5.10"
-source = "git+https://github.com/aggregat4/rust-rrule?branch=rrule-0.5#44df30566e6b6ab7e1c98f59c03e413ec996a570"
-dependencies = [
- "chrono",
- "chrono-tz 0.5.3",
- "lazy_static",
- "regex",
- "serde",
-]
-
-[[package]]
-name = "rrule"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "720acfb4980b9d8a6a430f6d7a11933e701ebbeba5eee39cc9d8c5f932aaff74"
 dependencies = [
  "chrono",
- "chrono-tz 0.10.4",
+ "chrono-tz",
  "log",
  "regex",
  "thiserror 2.0.12",

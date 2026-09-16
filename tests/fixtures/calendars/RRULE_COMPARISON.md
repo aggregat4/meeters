@@ -1,6 +1,20 @@
 # Recurrence engine comparison
 
-## Result
+## Status — 2026-09-16
+
+The migration comparison below is a historical record. The test-only fork has
+now been removed, along with its chrono-tz 0.5.3 dependency. Tests exercise
+upstream against explicit calendar and timezone expectations; the five legacy
+recurrence inputs assert occurrence counts and first/last dates. Invalid BYDAY
+still has an error regression test. The former fork-only smoke tests were
+redundant with those adapter tests and have been removed.
+
+Production and tests now share chrono-tz 0.10.4. The commands below run the
+retained regression suites, but no longer perform live fork comparisons; the
+old-version tree command is no longer applicable. Historical comparisons remain
+available in Git history.
+
+## Historical result
 
 The fork and adapted upstream produce identical outputs for the calendar
 compatibility fixtures, including the sanitized Exchange export. This covers
@@ -81,5 +95,4 @@ the handwritten synthetic assertions remain important.
 
 Event RDATE, floating recurrence support, broader recurrence-rule combinations,
 pathological input limits and further real-world providers remain outside this
-comparison. See README.md for the remaining calendar coverage. The retained
-fork comparison continues to guard production upstream behavior.
+comparison. See README.md for the remaining calendar coverage. The explicit expected-output contracts now guard production upstream behavior.

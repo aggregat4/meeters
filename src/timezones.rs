@@ -448,14 +448,8 @@ mod tests {
                     ),
                 ];
                 let dates =
-                    parse_occurrences_from_timespan(&properties, 2024, offset, Engine::Fork)
-                        .unwrap();
-                assert_eq!(
-                    dates,
                     parse_occurrences_from_timespan(&properties, 2024, offset, Engine::Upstream)
-                        .unwrap(),
-                    "observance UNTIL behavior differs"
-                );
+                        .unwrap();
                 assert_eq!(dates.len(), expected_len, "{offset}: {bound}");
                 assert_eq!(dates[0].to_string(), "2023-03-26 02:00:00");
                 if expected_len == 2 {
