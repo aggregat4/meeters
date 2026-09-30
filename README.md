@@ -1,4 +1,8 @@
-This is a graphical (GTK4) utility for Linux that lives in the tray as an app indicator, watches a configured ical calendar file URL and will notify shortly before a meeting begins. It allows you to directly open any (Zoom) embedded meeting URL with a single click from either the popup menu or the notification.
+Meeters is a GTK4 utility for Linux that lives in the system tray, reads a calendar
+from an ICS URL or Exchange Web Services (EWS), and notifies you shortly before
+meetings begin. You can open embedded Zoom meeting links from the tray menu or
+notification, and view meetings in a daily timeline. A command-line mode exports
+EWS calendar summaries as JSON.
 
 # Building
 
@@ -8,11 +12,26 @@ On Ubuntu/Debian, install them with `sudo apt install libgtk-4-dev libdbus-1-dev
 1. Clone repo
 1. `cargo build --locked`
 
+For an optimized build for your current system, run `cargo build --locked --release`.
+The executable is `target/release/meeters`. See the Linux compatibility baseline
+below before building binaries for distribution to other systems.
+
 # Installation
 
 You can drop the meeters binary anywhere. The desktop must provide a StatusNotifierItem tray host (for example, KDE Plasma’s tray or GNOME Shell with an AppIndicator/StatusNotifierItem extension). GTK3 and libappindicator are no longer required.
 
 The tarball includes a few (optional) icons that will be used when they are located next to the meeters binary. If not the program will default to a "new appointment" icon.
+
+To deploy a local release build, quit the running app with Ctrl+Q, replace your
+installed executable with `target/release/meeters`, and start it again. Keep the
+PNG icons from `assets/` next to the executable if you use them.
+
+# Meeting locations
+
+The timeline and meeting details display EWS room resources when available,
+including room response statuses in the details and a warning for declined rooms.
+If there are no room resources, they display the calendar's location text instead.
+This also shows locations supplied by ICS calendars.
 
 # Configuration
 
@@ -75,6 +94,37 @@ The following properties are supported:
 | MEETERS_USE_ZOOMMTG | no | false | If set to true, Zoom meeting URLs will be opened with `zoommtg://` instead of `https://`. |
 | MEETERS_LOG | no | warn | Controls stderr log verbosity. Supported values: `off`, `error`, `warn`, `info`, `debug`/`verbose`, and `trace`. |
 
+
+# Calendar JSON command
+
+```bash
+MEETERS_LOCAL_TIMEZONE=Europe/Berlin meeters --calendar-until 2026-10-31 > calendar.json
+```
+
+This one-shot, read-only EWS mode uses the same configuration, HTTPS/Basic auth,
+HTTP client and saved desktop-keyring password as the tray application. It does
+not start GTK, activate another instance, ask for an EWS password, save credentials,
+or change calendar entries. The desktop keyring can display its own unlock prompt;
+make it available and unlock it before running unattended.
+With no arguments, the normal tray behavior is retained; `meeters --help` shows usage.
+
+Supply a strict `YYYY-MM-DD` date, today or later in `MEETERS_LOCAL_TIMEZONE`
+(default `Europe/Berlin`). The interval starts at the current instant and ends
+**exclusively at midnight following the requested date**, so the entire requested
+local date is included, with daylight-saving transitions respected. Ongoing and
+all-day events overlapping the interval are included; events ending exactly now
+or starting exactly at the exclusive end are excluded. Ambiguous or nonexistent
+end midnights in other configured timezones are rejected.
+
+Stdout contains one JSON object with `timezone`, `start`, `end_exclusive`, and
+`events` (an empty array when there are no events). Events are sorted by start and
+contain `summary`, `start`, `end`, `all_day`, and `location`; timestamps use RFC 3339
+with UTC offsets. EWS CalendarView expands recurring occurrences. Bodies, attendee
+lists and body-only meeting links are neither requested nor returned. This mode
+requires `MEETERS_CALENDAR_SOURCE=ews`; `MEETERS_FUTURE_DAYS` does not limit it.
+Errors go to stderr with nonzero exit status and no JSON. A server-truncated
+calendar response fails instead of silently returning incomplete results; retry
+with a shorter date range. Configure missing or expired credentials via the tray.
 
 # D-Bus Interface
 
