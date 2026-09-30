@@ -110,6 +110,52 @@ pub fn fetch_events(
         .collect()
 }
 
+/// Read only the CalendarView summary fields; no GetItem/body request.
+pub fn fetch_event_summaries(
+    agent: &Agent,
+    config: &EwsConfig,
+    password: &str,
+    local_tz: &Tz,
+    start_time: DateTime<Tz>,
+    end_time: DateTime<Tz>,
+) -> Result<Vec<Event>, EwsError> {
+    let response = post_soap(
+        agent,
+        config,
+        password,
+        &find_item_request(start_time, end_time),
+        "http://schemas.microsoft.com/exchange/services/2006/messages/FindItem",
+    )?;
+    let doc =
+        Document::parse(&response).map_err(|_| EwsError::Other("Invalid EWS response".into()))?;
+    soap_fault_or_error(&doc)?;
+    // CalendarView does not support indexed paging. Never silently emit a partial result.
+    if !doc.descendants().any(|node| {
+        node.has_tag_name("RootFolder")
+            && matches!(
+                node.attribute("IncludesLastItemInRange"),
+                Some("true" | "1")
+            )
+    }) {
+        return Err(EwsError::Other(
+            "Incomplete EWS calendar; request a shorter range".into(),
+        ));
+    }
+    Ok(parse_find_item_response(&response, local_tz)?
+        .into_iter()
+        .map(|item| Event {
+            summary: item.summary,
+            location: item.location,
+            start_timestamp: item.start_timestamp,
+            end_timestamp: item.end_timestamp,
+            all_day: item.all_day,
+            description: String::new(),
+            meeturl: None,
+            metadata: EventMetadata::empty(),
+        })
+        .collect())
+}
+
 pub(crate) fn http_agent(timeout: Duration) -> Agent {
     Agent::config_builder()
         .timeout_global(Some(timeout))
@@ -466,6 +512,58 @@ mod tests {
         let mut body = vec![0; length];
         stream.read_exact(&mut body).unwrap();
         headers + &String::from_utf8(body).unwrap()
+    }
+
+    #[test]
+    fn summary_read_uses_only_find_item_and_rejects_partial_results() {
+        for complete in ["true", "false"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let config = EwsConfig {
+                url: format!("http://{}/ews", listener.local_addr().unwrap()),
+                user: "test".into(),
+            };
+            let server = thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut stream = BufReader::new(stream);
+                let request = read_request(&mut stream);
+                assert!(request.contains("<m:FindItem"));
+                assert!(!request.contains("item:Body"));
+                assert!(!request.contains("GetItem"));
+                assert!(request.contains("StartDate=\"2026-10-24T22:00:00Z\""));
+                assert!(request.contains("EndDate=\"2026-10-25T23:00:00Z\""));
+                let body = format!(
+                    r#"<FindItemResponse><RootFolder IncludesLastItemInRange="{complete}"><Items><CalendarItem><ItemId Id="one"/><Subject>All day</Subject><Start>2026-10-24T22:00:00Z</Start><End>2026-10-25T23:00:00Z</End><IsAllDayEvent>true</IsAllDayEvent></CalendarItem></Items></RootFolder></FindItemResponse>"#
+                );
+                write!(
+                    stream.get_mut(),
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            });
+            let tz = chrono_tz::Europe::Berlin;
+            let result = fetch_event_summaries(
+                &http_agent(Duration::from_secs(2)),
+                &config,
+                "test-password",
+                &tz,
+                tz.with_ymd_and_hms(2026, 10, 25, 0, 0, 0).unwrap(),
+                tz.with_ymd_and_hms(2026, 10, 26, 0, 0, 0).unwrap(),
+            );
+            if complete == "true" {
+                let events = result.unwrap();
+                assert_eq!(events.len(), 1);
+                assert!(events[0].all_day);
+                assert!(events[0].description.is_empty());
+            } else {
+                assert!(result.is_err());
+            }
+            server.join().unwrap();
+        }
     }
 
     #[test]

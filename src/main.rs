@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod binary_search;
 mod calendar_source;
+mod cli;
 mod config;
 mod custom_timezone;
 mod domain;
@@ -103,6 +104,30 @@ fn events_to_notify<'a>(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    match cli::parse_args(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        Ok(cli::Mode::Gui) => {}
+        Ok(cli::Mode::Help) => {
+            println!("{}", cli::HELP);
+            return Ok(());
+        }
+        mode => {
+            let result = match mode {
+                Ok(cli::Mode::Calendar(date)) => cli::run(date),
+                Err(error) => Err(error),
+                _ => unreachable!(),
+            };
+            match result {
+                Ok(json) => {
+                    println!("{}", json);
+                    return Ok(());
+                }
+                Err(error) => {
+                    eprintln!("meeters: {}", error);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
     logging::init_from_env();
 
     // Keep the existing public net.aggregat4.Meeters D-Bus service separate

@@ -1286,6 +1286,7 @@ dependencies = [
  "regex",
  "roxmltree",
  "rrule",
+ "serde_json",
  "ureq",
 ]
 

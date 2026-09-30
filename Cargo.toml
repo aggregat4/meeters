@@ -36,3 +36,4 @@ ureq = "3.4.1"
 async-channel = "2.1"
 html2text = "0.15"
 keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+serde_json = "1.0"
