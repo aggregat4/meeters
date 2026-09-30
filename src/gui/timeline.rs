@@ -159,9 +159,14 @@ fn positioned_events<'a>(events: &'a [Event], start_hour: i32) -> Vec<Positioned
     positioned_events
 }
 
+fn event_location(event: &Event) -> Option<&str> {
+    let location = event.location.trim();
+    (!location.is_empty()).then_some(location)
+}
+
 fn compact_room_label(event: &Event) -> Option<String> {
     let label = match event.metadata.rooms.as_slice() {
-        [] => None,
+        [] => event_location(event).map(str::to_owned),
         [room] => Some(room.name.clone()),
         [first, rest @ ..] => Some(format!("{} +{}", first.name.as_str(), rest.len())),
     }?;
@@ -219,6 +224,14 @@ fn room_list(participants: &[crate::domain::Participant]) -> String {
         .map(|participant| participant.display_text())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn event_location_detail(event: &Event) -> Option<(&'static str, String)> {
+    match event.metadata.rooms.len() {
+        0 => event_location(event).map(|location| ("Location", location.to_owned())),
+        1 => Some(("Room", room_list(&event.metadata.rooms))),
+        _ => Some(("Rooms", room_list(&event.metadata.rooms))),
+    }
 }
 
 pub struct TimelineView {
@@ -315,13 +328,8 @@ impl TimelineView {
         if let Some(organizer) = &event.metadata.organizer {
             Self::add_detail_row(&content, "Organizer", organizer);
         }
-        if !event.metadata.rooms.is_empty() {
-            let label = if event.metadata.rooms.len() == 1 {
-                "Room"
-            } else {
-                "Rooms"
-            };
-            Self::add_detail_row(&content, label, &room_list(&event.metadata.rooms));
+        if let Some((label, location)) = event_location_detail(event) {
+            Self::add_detail_row(&content, label, &location);
         }
         if !event.metadata.required_attendees.is_empty() {
             Self::add_detail_row(
@@ -730,6 +738,68 @@ mod tests {
         assert_eq!(positions.len(), 3);
         assert!(positions.iter().all(|position| position.lane_index == 0));
         assert!(positions.iter().all(|position| position.lane_count == 1));
+    }
+
+    #[test]
+    fn ics_location_is_visible_without_room_metadata() {
+        // Exchange ICS exports can provide only LOCATION, without resource attendees.
+        let calendar = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
+            UID:location-only@example.test\r\nSUMMARY:Planning\r\n\
+            DTSTART:20260929T071500Z\r\nDTEND:20260929T080000Z\r\n\
+            LOCATION:Building A\\, Room 12\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = crate::meeters_ical::extract_events(calendar, &chrono_tz::UTC, false).unwrap();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert!(event.metadata.rooms.is_empty());
+        assert_eq!(
+            event_button_text(event, false, true),
+            "Planning - Building A, Room 12"
+        );
+        assert_eq!(
+            event_button_text(event, false, false),
+            "Planning\nBuilding A, Room 12"
+        );
+        assert_eq!(
+            event_location_detail(event),
+            Some(("Location", "Building A, Room 12".to_string()))
+        );
+    }
+
+    #[test]
+    fn blank_location_does_not_add_a_room_label() {
+        let mut event = event("Planning", 16, 0, 30);
+        event.location = " \n ".to_string();
+        assert_eq!(event_button_text(&event, false, true), "Planning");
+        assert_eq!(event_location_detail(&event), None);
+    }
+
+    #[test]
+    fn resource_rooms_keep_response_status_and_take_precedence_over_location() {
+        let mut event = event_with_rooms(
+            "Planning",
+            16,
+            0,
+            30,
+            vec![
+                Participant {
+                    name: "Room 12".to_string(),
+                    response: Some(ResponseStatus::Accepted),
+                },
+                Participant {
+                    name: "Room 13".to_string(),
+                    response: Some(ResponseStatus::Declined),
+                },
+            ],
+        );
+        event.location = "Room 12; Room 13".to_string();
+        assert_eq!(
+            event_button_text(&event, false, true),
+            "Planning - Room 12 +1 !"
+        );
+        assert_eq!(
+            event_location_detail(&event),
+            Some(("Rooms", "Room 12: accepted, Room 13: DECLINED".to_string()))
+        );
     }
 
     #[test]
