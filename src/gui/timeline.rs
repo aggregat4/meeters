@@ -161,7 +161,11 @@ fn positioned_events<'a>(events: &'a [Event], start_hour: i32) -> Vec<Positioned
 
 fn event_location(event: &Event) -> Option<&str> {
     let location = event.location.trim();
-    (!location.is_empty()).then_some(location)
+    // The online marker and join action already represent a link-only location.
+    // Parse the original URL as well, since meeturl may use the zoommtg scheme.
+    let is_meeting_link = event.meeturl.as_deref() == Some(location)
+        || crate::meeters_ical::parse_zoom_url(location).as_deref() == Some(location);
+    (!location.is_empty() && !is_meeting_link).then_some(location)
 }
 
 fn compact_room_label(event: &Event) -> Option<String> {
@@ -763,6 +767,44 @@ mod tests {
             event_location_detail(event),
             Some(("Location", "Building A, Room 12".to_string()))
         );
+    }
+
+    #[test]
+    fn ics_zoom_location_uses_only_the_online_marker() {
+        let url = "https://example.zoom.us/j/123456789?pwd=example";
+        let calendar = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
+            UID:online-location@example.test\r\nSUMMARY:TPM review\r\n\
+            DTSTART:20261005T140000Z\r\nDTEND:20261005T150000Z\r\n\
+            LOCATION:{url}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        for use_zoommtg in [false, true] {
+            let events =
+                crate::meeters_ical::extract_events(&calendar, &chrono_tz::UTC, use_zoommtg)
+                    .unwrap();
+            let event = &events[0];
+            let expected_url = if use_zoommtg {
+                crate::meeters_ical::convert_to_zoommtg(url).unwrap()
+            } else {
+                url.to_owned()
+            };
+            assert_eq!(event.meeturl.as_deref(), Some(expected_url.as_str()));
+            for compact in [false, true] {
+                assert_eq!(
+                    event_button_text(event, false, compact),
+                    format!("TPM review{ONLINE_MEETING_MARKER}")
+                );
+            }
+            assert_eq!(event_location_detail(event), None);
+        }
+    }
+
+    #[test]
+    fn physical_location_with_a_meeting_link_remains_visible() {
+        let mut event = event("Planning", 16, 0, 30);
+        event.location = "Room 12; https://example.zoom.us/j/123456789".to_string();
+        event.meeturl = crate::meeters_ical::parse_zoom_url(&event.location);
+        assert_eq!(compact_room_label(&event), Some(event.location.clone()));
     }
 
     #[test]
