@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.13.0 (pending release)
+## 1.13.0 (2026-10-22)
 
 ### Features
 
@@ -54,4 +54,4 @@
 - Existing configuration and D-Bus window controls remain supported. JSON export
   requires EWS and an existing saved password; ICS export is not supported.
 
-[Changes since v1.12.0](https://github.com/aggregat4/meeters/compare/v1.12.0...main)
+[Changes since v1.12.0](https://github.com/aggregat4/meeters/compare/v1.12.0...v1.13.0)

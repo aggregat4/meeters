@@ -197,3 +197,16 @@ python3 tests/check_glibc.py target/release/meeters --max-version 2.35
 Build distributable binaries on Ubuntu 22.04 (or in a matching container), not on
 a newer developer workstation. The glibc check supplements the baseline runtime
 tests; it does not by itself verify GTK or other shared-library compatibility.
+
+# Release artifact recovery
+
+Publishing a GitHub release builds and uploads its Linux archive. If packaging
+fails, retry the existing release with the current workflow on `main`:
+
+```bash
+gh workflow run release.yml --ref main -f tag=v1.13.0
+```
+
+The retry requires an existing published release, checks out its tag, verifies
+that the Cargo version matches, and uses the Ubuntu 22.04 compatibility baseline.
+It does not move the tag or overwrite an existing archive.
